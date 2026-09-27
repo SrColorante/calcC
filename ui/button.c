@@ -9,11 +9,26 @@ void DrawCalcButton(Button* btn, Vector2 mousePos, Font font) {
     
     // Drop body (translucent liquid)
     Color bodyColor = isDark ? (Color){ 40, 45, 55, 180 } : (Color){ 210, 220, 230, 180 };
-    if (btn->is_hovered) {
-        bodyColor = isDark ? (Color){ 60, 65, 75, 200 } : (Color){ 230, 240, 250, 200 };
+    
+    // Custom color for C button
+    if (strcmp(btn->text, "C") == 0) {
+        bodyColor = isDark ? (Color){ 200, 100, 30, 180 } : (Color){ 240, 120, 40, 180 };
     }
+    
+    if (btn->is_hovered) {
+        if (strcmp(btn->text, "C") == 0) {
+            bodyColor = isDark ? (Color){ 220, 120, 40, 200 } : (Color){ 250, 140, 60, 200 };
+        } else {
+            bodyColor = isDark ? (Color){ 60, 65, 75, 200 } : (Color){ 230, 240, 250, 200 };
+        }
+    }
+    
     if (btn->is_pressed || btn->visual_press_timer > 0.0f) {
-        bodyColor = isDark ? (Color){ 80, 90, 110, 230 } : (Color){ 190, 210, 230, 230 };
+        if (strcmp(btn->text, "C") == 0) {
+            bodyColor = isDark ? (Color){ 240, 140, 50, 230 } : (Color){ 255, 160, 80, 230 };
+        } else {
+            bodyColor = isDark ? (Color){ 80, 90, 110, 230 } : (Color){ 190, 210, 230, 230 };
+        }
     }
 
     // 1.0f radius creates a perfect circle (if square) or pill (if rectangle)

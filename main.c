@@ -31,10 +31,12 @@ void UpdateLayout(void) {
     float sh = GetScreenHeight();
     
     float displayHeight = sh * 0.25f; // 25% for display
-    float buttonsAreaHeight = sh * 0.65f; // 65% for buttons
-    
     float marginX = sw * 0.05f;
     float marginY = sh * 0.05f;
+    
+    // Start buttons slightly lower to avoid overlapping the display
+    float buttonsStartY = displayHeight + marginY + (sh * 0.03f); 
+    float buttonsAreaHeight = sh - buttonsStartY - marginY;
     
     float availableWidth = sw - 2*marginX;
     float pad = sh * 0.02f; // Dynamic padding
@@ -51,7 +53,7 @@ void UpdateLayout(void) {
     float gridHeight = 5 * size + 4 * pad;
     
     float startX = marginX + (availableWidth - gridWidth) / 2.0f;
-    float startY = displayHeight + marginY + (buttonsAreaHeight - gridHeight) / 2.0f;
+    float startY = buttonsStartY + (buttonsAreaHeight - gridHeight) / 2.0f;
     
     const char* labels[5][4] = {
         {"C", "%", "*", "/"},
@@ -271,7 +273,7 @@ int main() {
         ExprToString(exprList, displayBuffer, sizeof(displayBuffer));
         
         bool isDark = (IsSystemThemeDark() == 1);
-        Color appBg = isDark ? (Color){20, 20, 20, 230} : (Color){240, 240, 240, 230};
+        Color appBg = isDark ? (Color){20, 20, 20, 255} : (Color){240, 240, 240, 255};
         
         // Shader needs to be drawn inside the rounded app background
         BeginDrawing();
@@ -283,6 +285,10 @@ int main() {
         float appSmuss = 0.15f;
         Rectangle appRec = {0, 0, currentSw, currentSh};
         DrawRectangleRounded(appRec, appSmuss, SEGM, appBg);
+        
+        // App Outline (ricontornare l'app)
+        Color outlineColor = isDark ? (Color){60, 60, 60, 255} : (Color){180, 180, 180, 255};
+        DrawRectangleRoundedLines(appRec, appSmuss, SEGM, 3, outlineColor);
         
         // Draw Display Area as a rounded box
         Rectangle displayRec = {

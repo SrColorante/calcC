@@ -78,14 +78,23 @@ void DrawCalcButton(Button* btn, Vector2 mousePos, Font font) { // Corpo della f
     
     // Impostiamo il colore di base (design flat/minimalista). Variamo in base a tema Scuro o Chiaro. (Alpha 180 = traslucido)
     Color bodyColor = isDark ? (Color){ 40, 45, 55, 180 } : (Color){ 210, 220, 230, 180 };
+    
+    // Tinta personalizzata arancione solo per il bottone di cancellazione
+    if (strcmp(btn->text, "C") == 0) {
+        bodyColor = isDark ? (Color){ 200, 100, 30, 180 } : (Color){ 240, 120, 40, 180 };
+    }
+    
     if (btn->is_hovered) { // Se il mouse ci passa sopra
         // Schiariamo leggermente rendendo più opaco (Alpha 200)
-        bodyColor = isDark ? (Color){ 60, 65, 75, 200 } : (Color){ 230, 240, 250, 200 };
+        if (strcmp(btn->text, "C") == 0) bodyColor = isDark ? (Color){ 220, 120, 40, 200 } : (Color){ 250, 140, 60, 200 };
+        else bodyColor = isDark ? (Color){ 60, 65, 75, 200 } : (Color){ 230, 240, 250, 200 };
     }
+    
     // Se il tasto è fisicamente cliccato col mouse OPPURE animato tramite tastiera
     if (btn->is_pressed || btn->visual_press_timer > 0.0f) {
         // Il bottone diventa ancora più luminoso e denso
-        bodyColor = isDark ? (Color){ 80, 90, 110, 230 } : (Color){ 190, 210, 230, 230 };
+        if (strcmp(btn->text, "C") == 0) bodyColor = isDark ? (Color){ 240, 140, 50, 230 } : (Color){ 255, 160, 80, 230 };
+        else bodyColor = isDark ? (Color){ 80, 90, 110, 230 } : (Color){ 190, 210, 230, 230 };
     }
 
     // Disegniamo la massa principale del pulsante. Raggio 1.0f = tondo perfetto.
@@ -342,20 +351,30 @@ void UpdateLayout(void) {
     float sw = GetScreenWidth(); // Larghezza della finestra al frame corrente 
     float sh = GetScreenHeight(); // Altezza effettiva al frame
     
-    float displayHeight = sh * 0.30f; // Il display LCD riserva 30% del monitor
-    float buttonsAreaHeight = sh * 0.60f; // La zona bottoni ottiene il 60%
-    
+    float displayHeight = sh * 0.25f; // Il display LCD riserva 25% del monitor
     float marginX = sw * 0.05f; // Margine Orizzontale al 5%
     float marginY = sh * 0.05f; // Margine Verticale 5%
     
-    float availableWidth = sw - 2*marginX; // La larghezza sfruttabile della griglia
-    float pad = 16.0f; // Distanza fissa per distanziare le gocce d'acqua
-    // Algoritmo: lo spazio per N bottoni è: (Spazio - tutti i pad centrali(3)) / Colonne(4)
-    float w = (availableWidth - 3*pad) / 4.0f; 
-    float h = (buttonsAreaHeight - 4*pad) / 5.0f;
+    // Distanziamo l'inizio dei bottoni per non collidere mai col display
+    float buttonsStartY = displayHeight + marginY + (sh * 0.03f); 
+    float buttonsAreaHeight = sh - buttonsStartY - marginY;
     
-    float startX = marginX; // Cursore di partenza asse X
-    float startY = displayHeight + marginY; // Cursore di partenza asse Y
+    float availableWidth = sw - 2*marginX; // La larghezza sfruttabile della griglia
+    float pad = sh * 0.02f; // Distanza dinamica proporzionale allo schermo
+    
+    // Calcolo massimo per mantenere le proporzioni
+    float max_w = (availableWidth - 3*pad) / 4.0f;
+    float max_h = (buttonsAreaHeight - 4*pad) / 5.0f;
+    
+    // Forza i pulsanti ad essere quadrati (cerchi perfetti in arrotondamento 1.0f)
+    float size = (max_w < max_h) ? max_w : max_h;
+    
+    // Centra l'intera griglia calcolatrice nello schermo Wayland deformato
+    float gridWidth = 4 * size + 3 * pad;
+    float gridHeight = 5 * size + 4 * pad;
+    
+    float startX = marginX + (availableWidth - gridWidth) / 2.0f;
+    float startY = buttonsStartY + (buttonsAreaHeight - gridHeight) / 2.0f;
     
     // Mappatura fissa 2D testuale della nostra tastiera (Notare i null negli spot speciali vuoti)
     const char* labels[5][4] = {
@@ -620,10 +639,13 @@ int main() { // Entry point
         Rectangle appRec = {0, 0, SCREEN_WIDTH, SCREEN_HEIGHT};
         // Colora la base dell'applicativo (Finestra Niri) calcolando isDark (Color) usando (R,G,B, Alpha). 
         // 20,20,20, 180 farà intravedere lo sfondo del desktop sotto la calcolatrice dando l'effetto Vetro (Glass).
-        Color appBg = (IsSystemThemeDark() == 1) ? (Color){20, 20, 20, 180} : (Color){240, 240, 240, 180};
-        DrawRectangleRounded(appRec, appSmuss, SEGM, appBg); // Stampa
+        // App background (opaco per contornare l'app)
+        Color appBg = (IsSystemThemeDark() == 1) ? (Color){20, 20, 20, 255} : (Color){240, 240, 240, 255};
+        DrawRectangleRounded(appRec, appSmuss, SEGM, appBg); // Stampa il background pieno
         
-        // Rendering Testo Dinamico Display (Stampa usando algoritmi di smussatura Raylib)
+        // Disegna un bordo di contorno per delineare l'app
+        Color outlineColor = (IsSystemThemeDark() == 1) ? (Color){60, 60, 60, 255} : (Color){180, 180, 180, 255};
+        DrawRectangleRoundedLines(appRec, appSmuss, SEGM, 3, outlineColor);
         Rectangle displayRec = {
             SCREEN_WIDTH * 0.05f, 
             SCREEN_HEIGHT * 0.05f, 
