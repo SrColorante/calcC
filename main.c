@@ -27,22 +27,31 @@ void TriggerButtonVisual(const char* label) {
 }
 
 void UpdateLayout(void) {
-    float sw = SCREEN_WIDTH;
-    float sh = SCREEN_HEIGHT;
+    float sw = GetScreenWidth();
+    float sh = GetScreenHeight();
     
-    float displayHeight = sh * 0.30f;
-    float buttonsAreaHeight = sh * 0.60f;
+    float displayHeight = sh * 0.25f; // 25% for display
+    float buttonsAreaHeight = sh * 0.65f; // 65% for buttons
     
     float marginX = sw * 0.05f;
     float marginY = sh * 0.05f;
     
     float availableWidth = sw - 2*marginX;
-    float pad = 16.0f;
-    float w = (availableWidth - 3*pad) / 4.0f;
-    float h = (buttonsAreaHeight - 4*pad) / 5.0f;
+    float pad = sh * 0.02f; // Dynamic padding
     
-    float startX = marginX;
-    float startY = displayHeight + marginY;
+    // Calculate max possible width and height for a button
+    float max_w = (availableWidth - 3*pad) / 4.0f;
+    float max_h = (buttonsAreaHeight - 4*pad) / 5.0f;
+    
+    // Force them to be square (perfect circles)
+    float size = (max_w < max_h) ? max_w : max_h;
+    
+    // Center the grid in the available area
+    float gridWidth = 4 * size + 3 * pad;
+    float gridHeight = 5 * size + 4 * pad;
+    
+    float startX = marginX + (availableWidth - gridWidth) / 2.0f;
+    float startY = displayHeight + marginY + (buttonsAreaHeight - gridHeight) / 2.0f;
     
     const char* labels[5][4] = {
         {"C", "%", "*", "/"},
@@ -62,18 +71,18 @@ void UpdateLayout(void) {
             buttons[btn_idx].grid_y = r;
             strcpy(buttons[btn_idx].text, labels[r][c]);
             
-            float bx = startX + c * (w + pad);
-            float by = startY + r * (h + pad);
+            float bx = startX + c * (size + pad);
+            float by = startY + r * (size + pad);
             
             if (r == 4 && c == 1) {
                 buttons[btn_idx].shape = BTN_H_LONG;
-                buttons[btn_idx].rect = (Rectangle){ bx, by, w*2 + pad, h };
+                buttons[btn_idx].rect = (Rectangle){ bx, by, size*2 + pad, size };
             } else if (r == 3 && c == 3) {
                 buttons[btn_idx].shape = BTN_V_LONG;
-                buttons[btn_idx].rect = (Rectangle){ bx, by, w, h*2 + pad };
+                buttons[btn_idx].rect = (Rectangle){ bx, by, size, size*2 + pad };
             } else {
                 buttons[btn_idx].shape = BTN_NORMAL;
-                buttons[btn_idx].rect = (Rectangle){ bx, by, w, h };
+                buttons[btn_idx].rect = (Rectangle){ bx, by, size, size };
             }
             btn_idx++;
         }
@@ -220,7 +229,7 @@ void HandleButtonPress(Button* b) {
 }
 
 int main() {
-    SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT);
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT);
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Calculator");
     
     if (!IsWindowReady()) {
@@ -233,6 +242,7 @@ int main() {
     Font customFont = LoadFontEx("assets/Comfortaa.ttf", 64, 0, 0);
     while (!WindowShouldClose()) {
         if (IsKeyPressed(KEY_ESCAPE)) break;
+        if (IsWindowResized()) UpdateLayout();
         
         float dt = GetFrameTime();
         Vector2 mouse = GetMousePosition();
@@ -268,16 +278,18 @@ int main() {
         ClearBackground(BLANK);
         
         // Draw Main App Background (smaller radius than buttons)
+        float currentSw = GetScreenWidth();
+        float currentSh = GetScreenHeight();
         float appSmuss = 0.15f;
-        Rectangle appRec = {0, 0, SCREEN_WIDTH, SCREEN_HEIGHT};
+        Rectangle appRec = {0, 0, currentSw, currentSh};
         DrawRectangleRounded(appRec, appSmuss, SEGM, appBg);
         
         // Draw Display Area as a rounded box
         Rectangle displayRec = {
-            SCREEN_WIDTH * 0.05f, 
-            SCREEN_HEIGHT * 0.05f, 
-            SCREEN_WIDTH * 0.90f, 
-            SCREEN_HEIGHT * 0.25f
+            currentSw * 0.05f, 
+            currentSh * 0.05f, 
+            currentSw * 0.90f, 
+            currentSh * 0.25f
         };
         Color displayBg = isDark ? (Color){30, 30, 30, 220} : (Color){220, 220, 220, 220};
         DrawRectangleRounded(displayRec, SMUSS, SEGM, displayBg);
