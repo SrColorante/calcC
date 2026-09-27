@@ -75,3 +75,8 @@ La richiesta di design era "gocce d'acqua sopra un piano". Dato che Raylib non s
 4. **Riflesso Interno:** In basso a destra viene disegnata un'altra piccola forma bianca molto tenue per simulare la luce che attraversa il liquido e illumina la base della goccia (caustica).
 
 Tutto questo si aggiorna a 60+ FPS rendendo l'esperienza fluida e ultra-responsiva su ecosistemi Wayland.
+
+## Aggiornamenti Recenti
+- **Risoluzione Bug Input Doppio**: Il programma ora legge nativamente tutti i caratteri ripetuti o in combinazione con Shift senza sdoppiare l'input.
+- **Modulo (%)**: Aggiunto l'operatore modulo (%) al posto delle parentesi per un'esecuzione lineare garantita.
+- **Water Drops Migliorati**: Corretto l'aspetto delle gocce d'acqua fondendo le ellissi interne per un look molto più coerente e coeso.
