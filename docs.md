@@ -76,15 +76,10 @@ void DrawCalcButton(Button* btn, Vector2 mousePos, Font font) { // Corpo della f
     // Controlliamo in tempo reale se il sistema operativo sta usando il tema scuro
     bool isDark = (IsSystemThemeDark() == 1);
     
-    // Generiamo l'ombra esterna sfalsandola in basso e a destra (+3, +4 pixel)
-    Rectangle shadowRec = { btn->rect.x + 3, btn->rect.y + 4, btn->rect.width, btn->rect.height };
-    // Disegniamo l'ombra usando 1.0f di curvatura (massima) con una trasparenza (Alpha 50 per ombre leggere)
-    DrawRectangleRounded(shadowRec, 1.0f, SEGM, (Color){ 0, 0, 0, 50 });
-    
-    // Impostiamo il colore di base del liquido. Variamo in base a tema Scuro o Chiaro. (Alpha 180 = traslucido)
+    // Impostiamo il colore di base (design flat/minimalista). Variamo in base a tema Scuro o Chiaro. (Alpha 180 = traslucido)
     Color bodyColor = isDark ? (Color){ 40, 45, 55, 180 } : (Color){ 210, 220, 230, 180 };
     if (btn->is_hovered) { // Se il mouse ci passa sopra
-        // Schiariamo leggermente la goccia rendendola più opaca (Alpha 200)
+        // Schiariamo leggermente rendendo più opaco (Alpha 200)
         bodyColor = isDark ? (Color){ 60, 65, 75, 200 } : (Color){ 230, 240, 250, 200 };
     }
     // Se il tasto è fisicamente cliccato col mouse OPPURE animato tramite tastiera
@@ -93,29 +88,8 @@ void DrawCalcButton(Button* btn, Vector2 mousePos, Font font) { // Corpo della f
         bodyColor = isDark ? (Color){ 80, 90, 110, 230 } : (Color){ 190, 210, 230, 230 };
     }
 
-    // Disegniamo la massa principale della goccia, usando bodyColor calcolato poco fa. Raggio 1.0f = tondo perfetto.
+    // Disegniamo la massa principale del pulsante. Raggio 1.0f = tondo perfetto.
     DrawRectangleRounded(btn->rect, 1.0f, SEGM, bodyColor);
-    
-    // Per ricreare il riflesso della luce (Specular highlight), calcoliamo un piccolo riquadro
-    // posizionato leggermente in alto a sinistra, grande solo una frazione del bottone originale.
-    Rectangle highlightRec = { 
-        btn->rect.x + btn->rect.width * 0.15f,  // Spostato al 15% della larghezza
-        btn->rect.y + btn->rect.height * 0.10f, // Spostato al 10% dell'altezza
-        btn->rect.width * 0.5f,                 // Largo il 50%
-        btn->rect.height * 0.35f                // Alto il 35%
-    };
-    // Disegniamo l'highlight con colore completamente bianco ma appena percettibile (Alpha 80)
-    DrawRectangleRounded(highlightRec, 1.0f, SEGM, (Color){ 255, 255, 255, 80 });
-
-    // Per completare l'effetto "bolla", calcoliamo una riflessione secondaria sul fondo a destra (Caustiche)
-    Rectangle bottomReflect = {
-        btn->rect.x + btn->rect.width * 0.4f, // Spostato a destra del 40%
-        btn->rect.y + btn->rect.height * 0.7f, // Molto in basso, 70%
-        btn->rect.width * 0.5f, // Largo il 50%
-        btn->rect.height * 0.2f // Schiacciato: alto solo il 20%
-    };
-    // Lo disegniamo con opacità quasi nulla (Alpha 30) per dare appena profondità
-    DrawRectangleRounded(bottomReflect, 1.0f, SEGM, (Color){ 255, 255, 255, 30 });
 
     // Calcoliamo lo spazio occupato dall'etichetta testuale usando il nostro font Comfortaa
     Vector2 textSize = MeasureTextEx(font, btn->text, FONT_SIZE, 1);

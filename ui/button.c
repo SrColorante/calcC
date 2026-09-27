@@ -7,10 +7,6 @@ void DrawCalcButton(Button* btn, Vector2 mousePos, Font font) {
     // The instructions: "bottoni della calcolatrice a cerchio che sembrano delle gocce dacqua sopra un piano"
     bool isDark = (IsSystemThemeDark() == 1);
     
-    // Base shadow
-    Rectangle shadowRec = { btn->rect.x + 3, btn->rect.y + 4, btn->rect.width, btn->rect.height };
-    DrawRectangleRounded(shadowRec, 1.0f, SEGM, (Color){ 0, 0, 0, 50 });
-    
     // Drop body (translucent liquid)
     Color bodyColor = isDark ? (Color){ 40, 45, 55, 180 } : (Color){ 210, 220, 230, 180 };
     if (btn->is_hovered) {
@@ -22,15 +18,6 @@ void DrawCalcButton(Button* btn, Vector2 mousePos, Font font) {
 
     // 1.0f radius creates a perfect circle (if square) or pill (if rectangle)
     DrawRectangleRounded(btn->rect, 1.0f, SEGM, bodyColor);
-    
-    // Soft Specular highlight (single soft glare on top)
-    Rectangle highlightRec = { 
-        btn->rect.x + btn->rect.width * 0.15f, 
-        btn->rect.y + btn->rect.height * 0.05f, 
-        btn->rect.width * 0.7f, 
-        btn->rect.height * 0.25f 
-    };
-    DrawRectangleRounded(highlightRec, 1.0f, SEGM, (Color){ 255, 255, 255, 30 });
 
     // Draw Text
     Vector2 textSize = MeasureTextEx(font, btn->text, FONT_SIZE, 1);

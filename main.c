@@ -271,7 +271,7 @@ int main() {
         ExprToString(exprList, displayBuffer, sizeof(displayBuffer));
         
         bool isDark = (IsSystemThemeDark() == 1);
-        Color appBg = isDark ? (Color){20, 20, 20, 180} : (Color){240, 240, 240, 180};
+        Color appBg = isDark ? (Color){20, 20, 20, 230} : (Color){240, 240, 240, 230};
         
         // Shader needs to be drawn inside the rounded app background
         BeginDrawing();

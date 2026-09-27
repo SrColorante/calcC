@@ -67,7 +67,7 @@ Allo stesso modo, `animSlideUp` sposta le coordinate `Y` (verticali) del testo q
 
 ## 3. Il Rendering a Goccia d'Acqua (`ui/button.c`)
 Ogni bottone viene renderizzato utilizzando `DrawCalcButton`.
-La richiesta di design era "gocce d'acqua sopra un piano". Dato che Raylib non supporta shader per singolo widget facilmente, l'effetto liquid-glass è stato riprodotto stratificando diverse forme geometriche arrotondate con il massimo smusso possibile (`1.0f` che trasforma il quadrato in un cerchio perfetto):
+La richiesta di design era "bottoni minimal sopra un piano". Dato che Raylib non supporta shader per singolo widget facilmente, l'effetto liquid-glass è stato riprodotto stratificando diverse forme geometriche arrotondate con il massimo smusso possibile (`1.0f` che trasforma il quadrato in un cerchio perfetto):
 
 1. **Ombra Esterna (Drop Shadow):** Viene disegnata un'ellisse nera semitrasparente sfalsata in basso a destra (`+3, +4`) per simulare l'elevazione.
 2. **Corpo Traslucido:** Viene disegnata la goccia vera e propria con un colore solido ma un `Alpha` basso (`180-230`), per permettere allo sfondo dell'app di trasparire leggermente e simulare la densità liquida.
@@ -79,4 +79,4 @@ Tutto questo si aggiorna a 60+ FPS rendendo l'esperienza fluida e ultra-responsi
 ## Aggiornamenti Recenti
 - **Risoluzione Bug Input Doppio**: Il programma ora legge nativamente tutti i caratteri ripetuti o in combinazione con Shift senza sdoppiare l'input.
 - **Modulo (%)**: Aggiunto l'operatore modulo (%) al posto delle parentesi per un'esecuzione lineare garantita.
-- **Water Drops Migliorati**: Corretto l'aspetto delle gocce d'acqua fondendo le ellissi interne per un look molto più coerente e coeso.
+- **Water Drops Migliorati**: Corretto l'aspetto delle bottoni minimal fondendo le ellissi interne per un look molto più coerente e coeso.
