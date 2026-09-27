@@ -206,6 +206,7 @@ void HandleKeyboardInput() {
 }
 
 void HandleButtonPress(Button* b) {
+    printf("Button Pressed: %s\n", b->text);
     if (strcmp(b->text, "=") == 0) {
         bool err;
         lastResult = EvaluateExpr(exprList, &err);
@@ -231,7 +232,7 @@ void HandleButtonPress(Button* b) {
 }
 
 int main() {
-    SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT);
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_WINDOW_TRANSPARENT | FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT);
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Calculator");
     
     if (!IsWindowReady()) {
@@ -244,7 +245,8 @@ int main() {
     Font customFont = LoadFontEx("assets/Comfortaa.ttf", 64, 0, 0);
     while (!WindowShouldClose()) {
         if (IsKeyPressed(KEY_ESCAPE)) break;
-        if (IsWindowResized()) UpdateLayout();
+        
+        UpdateLayout(); // Run every frame to prevent Wayland desync
         
         float dt = GetFrameTime();
         Vector2 mouse = GetMousePosition();
