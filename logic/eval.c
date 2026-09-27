@@ -62,26 +62,23 @@ double EvaluateExpr(ExprNode* head, bool* error) {
     if (!head) return 0;
     
     // 1. Convert linked list nodes to parallel arrays of doubles/chars.
-    // We combine consecutive digits and decimal points into single numbers.
     double vals[100];
     char ops[100];
     int v_count = 0, o_count = 0;
     
     ExprNode* curr = head;
     while (curr) {
-        if (curr->type == NODE_NUM) {
+        if (curr->type == NODE_NUM || (curr->type == NODE_OP && curr->op == '.')) {
             double val = 0;
             double decimal_mult = 1;
             bool in_decimal = false;
             
-            // Read full number including decimals
             while (curr && (curr->type == NODE_NUM || (curr->type == NODE_OP && curr->op == '.'))) {
                 if (curr->type == NODE_OP && curr->op == '.') {
                     in_decimal = true;
                 } else if (curr->type == NODE_NUM) {
-                    if (!in_decimal) {
-                        val = val * 10 + curr->n;
-                    } else {
+                    if (!in_decimal) val = val * 10 + curr->n;
+                    else {
                         decimal_mult /= 10.0;
                         val = val + curr->n * decimal_mult;
                     }
@@ -95,28 +92,21 @@ double EvaluateExpr(ExprNode* head, bool* error) {
         }
     }
     
-    // 2. Evaluate sqrt
-    // Since sqrt is an operator that precedes a number, let's process it.
+    // Syntax Validation
+    if (v_count == 0 && o_count > 0) { *error = true; return 0; }
+    if (o_count >= v_count) { *error = true; return 0; }
+    
+    // 2. Multiply/Divide/Modulo
     for (int i=0; i<o_count; i++) {
-        if (ops[i] == 's') {
-            // sqrt should apply to the next number
-            if (i < v_count) {
-                vals[i] = sqrt(vals[i]);
-            }
-            // Remove 's' from ops
-            for (int j=i; j<o_count-1; j++) ops[j] = ops[j+1];
-            o_count--;
-            i--;
-        }
-    }
-
-    // 3. Multiply/Divide
-    for (int i=0; i<o_count; i++) {
-        if (ops[i] == '*' || ops[i] == '/') {
+        if (ops[i] == '*' || ops[i] == '/' || ops[i] == '%') {
             if (ops[i] == '*') vals[i] = vals[i] * vals[i+1];
             if (ops[i] == '/') {
                 if (vals[i+1] == 0) { *error = true; return 0; }
                 vals[i] = vals[i] / vals[i+1];
+            }
+            if (ops[i] == '%') {
+                if (vals[i+1] == 0) { *error = true; return 0; }
+                vals[i] = fmod(vals[i], vals[i+1]);
             }
             for (int j=i+1; j<v_count-1; j++) vals[j] = vals[j+1];
             for (int j=i; j<o_count-1; j++) ops[j] = ops[j+1];

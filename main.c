@@ -45,7 +45,7 @@ void UpdateLayout(void) {
     float startY = displayHeight + marginY;
     
     const char* labels[5][4] = {
-        {"C", "()", "*", "/"},
+        {"C", "%", "*", "/"},
         {"7", "8", "9", "-"},
         {"4", "5", "6", "+"},
         {"1", "2", "3", "="},
@@ -182,21 +182,12 @@ void HandleKeyboardInput() {
         key = GetKeyPressed();
     }
     
-    // Numpad and numbers with IsKeyPressedRepeat support
-    for (int k = KEY_ZERO; k <= KEY_NINE; k++) {
-        if (IsKeyPressed(k) || IsKeyPressedRepeat(k)) HandleAnsLogic(false, '\0', k - KEY_ZERO);
-    }
-    for (int k = KEY_KP_0; k <= KEY_KP_9; k++) {
-        if (IsKeyPressed(k) || IsKeyPressedRepeat(k)) HandleAnsLogic(false, '\0', k - KEY_KP_0);
-    }
-    
-    // Use GetCharPressed for characters (handles shift properly)
+    // Use GetCharPressed for characters (handles shift properly, avoids double input)
     int ch = GetCharPressed();
     while (ch > 0) {
         if (ch >= '0' && ch <= '9') HandleAnsLogic(false, '\0', ch - '0');
-        else if (ch == '+' || ch == '-' || ch == '*' || ch == '/') HandleAnsLogic(true, (char)ch, -1);
-        else if (ch == '.' || ch == '(' || ch == ')') {
-            if (ch == '(' || ch == ')') TriggerButtonVisual("()");
+        else if (ch == '+' || ch == '-' || ch == '*' || ch == '/' || ch == '%') HandleAnsLogic(true, (char)ch, -1);
+        else if (ch == '.') {
             HandleAnsLogic(false, (char)ch, -1);
         }
         ch = GetCharPressed();
@@ -216,14 +207,8 @@ void HandleButtonPress(Button* b) {
             HandleAnsLogic(false, '\0', b->text[0] - '0');
         } else if (strcmp(b->text, ".") == 0) {
             HandleAnsLogic(false, '.', -1);
-        } else if (strcmp(b->text, "()") == 0) {
-            if (!exprList) HandleAnsLogic(false, '(', -1);
-            else {
-                ExprNode* curr = exprList;
-                while (curr->next) curr = curr->next;
-                if (curr->type == NODE_NUM) HandleAnsLogic(false, ')', -1);
-                else HandleAnsLogic(false, '(', -1);
-            }
+        } else if (strcmp(b->text, "%") == 0) {
+            HandleAnsLogic(true, '%', -1);
         } else if (strcmp(b->text, "C") == 0) {
             ClearExpr(&exprList);
             strcpy(resultBuffer, "");
