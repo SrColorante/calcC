@@ -228,14 +228,16 @@ int main() {
         return 1;
     }
     
+    UpdateLayout();
+    
     Font customFont = LoadFontEx("assets/Comfortaa.ttf", 64, 0, 0);
     while (!WindowShouldClose()) {
         if (IsKeyPressed(KEY_ESCAPE)) break;
+        if (IsWindowResized()) UpdateLayout();
         
         float dt = GetFrameTime();
         Vector2 mouse = GetMousePosition();
         
-        UpdateLayout();
         HandleKeyboardInput();
         
         for (int i=0; i<NUM_BUTTONS; i++) {
