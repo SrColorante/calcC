@@ -3,31 +3,29 @@
 #include <math.h>
 
 void DrawCalcButton(Button* btn, Vector2 mousePos, Font font) {
-    // btn->is_hovered is set in main.c, but we can double check here or just use it.
-    // The instructions: "bottoni della calcolatrice a cerchio che sembrano delle gocce dacqua sopra un piano"
     bool isDark = (IsSystemThemeDark() == 1);
     
-    // Drop body (translucent liquid)
-    Color bodyColor = isDark ? (Color){ 40, 45, 55, 180 } : (Color){ 210, 220, 230, 180 };
+    // Base colors (Black/Dark for dark mode, White/Light for light mode)
+    Color bodyColor = isDark ? (Color){ 20, 20, 25, 255 } : (Color){ 230, 230, 230, 255 };
     
-    // Custom color for C button
+    // Custom color for C button (Electric Blue / Crimson Red)
     if (strcmp(btn->text, "C") == 0) {
-        bodyColor = isDark ? (Color){ 200, 100, 30, 180 } : (Color){ 240, 120, 40, 180 };
+        bodyColor = isDark ? (Color){ 0, 120, 220, 255 } : (Color){ 200, 20, 50, 255 };
     }
     
     if (btn->is_hovered) {
         if (strcmp(btn->text, "C") == 0) {
-            bodyColor = isDark ? (Color){ 220, 120, 40, 200 } : (Color){ 250, 140, 60, 200 };
+            bodyColor = isDark ? (Color){ 0, 150, 255, 255 } : (Color){ 220, 40, 70, 255 };
         } else {
-            bodyColor = isDark ? (Color){ 60, 65, 75, 200 } : (Color){ 230, 240, 250, 200 };
+            bodyColor = isDark ? (Color){ 40, 40, 50, 255 } : (Color){ 210, 210, 210, 255 };
         }
     }
     
     if (btn->is_pressed || btn->visual_press_timer > 0.0f) {
         if (strcmp(btn->text, "C") == 0) {
-            bodyColor = isDark ? (Color){ 240, 140, 50, 230 } : (Color){ 255, 160, 80, 230 };
+            bodyColor = isDark ? (Color){ 50, 180, 255, 255 } : (Color){ 240, 60, 90, 255 };
         } else {
-            bodyColor = isDark ? (Color){ 80, 90, 110, 230 } : (Color){ 190, 210, 230, 230 };
+            bodyColor = isDark ? (Color){ 0, 100, 180, 255 } : (Color){ 180, 20, 40, 255 }; // Accents when pressed!
         }
     }
 
@@ -41,5 +39,6 @@ void DrawCalcButton(Button* btn, Vector2 mousePos, Font font) {
         btn->rect.y + (btn->rect.height - textSize.y) / 2.0f
     };
     Color textColor = isDark ? WHITE : BLACK;
+    if (strcmp(btn->text, "C") == 0) textColor = WHITE; // Always white for C to contrast accent
     DrawTextEx(font, btn->text, textPos, FONT_SIZE, 1, textColor);
 }

@@ -275,7 +275,7 @@ int main() {
         ExprToString(exprList, displayBuffer, sizeof(displayBuffer));
         
         bool isDark = (IsSystemThemeDark() == 1);
-        Color appBg = isDark ? (Color){20, 20, 20, 255} : (Color){240, 240, 240, 255};
+        Color appBg = isDark ? (Color){5, 5, 5, 255} : (Color){250, 250, 250, 255}; // Deep black / Pure white
         
         // Shader needs to be drawn inside the rounded app background
         BeginDrawing();
@@ -285,11 +285,13 @@ int main() {
         float currentSw = GetScreenWidth();
         float currentSh = GetScreenHeight();
         float appSmuss = 0.15f;
-        Rectangle appRec = {0, 0, currentSw, currentSh};
+        
+        // INSET the rectangle by 2 pixels on all sides so the outline isn't cut by Wayland bounds!
+        Rectangle appRec = {2, 2, currentSw - 4, currentSh - 4};
         DrawRectangleRounded(appRec, appSmuss, SEGM, appBg);
         
-        // App Outline (ricontornare l'app)
-        Color outlineColor = isDark ? (Color){60, 60, 60, 255} : (Color){180, 180, 180, 255};
+        // App Outline (ricontornare l'app) - Electric Blue / Crimson Red
+        Color outlineColor = isDark ? (Color){0, 150, 255, 255} : (Color){220, 20, 60, 255};
         DrawRectangleRoundedLines(appRec, appSmuss, SEGM, 3, outlineColor);
         
         // Draw Display Area as a rounded box
