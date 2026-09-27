@@ -23,23 +23,14 @@ void DrawCalcButton(Button* btn, Vector2 mousePos, Font font) {
     // 1.0f radius creates a perfect circle (if square) or pill (if rectangle)
     DrawRectangleRounded(btn->rect, 1.0f, SEGM, bodyColor);
     
-    // Specular highlight (glare on top left of the drop)
+    // Soft Specular highlight (single soft glare on top)
     Rectangle highlightRec = { 
         btn->rect.x + btn->rect.width * 0.15f, 
-        btn->rect.y + btn->rect.height * 0.10f, 
-        btn->rect.width * 0.5f, 
-        btn->rect.height * 0.35f 
+        btn->rect.y + btn->rect.height * 0.05f, 
+        btn->rect.width * 0.7f, 
+        btn->rect.height * 0.25f 
     };
-    DrawRectangleRounded(highlightRec, 1.0f, SEGM, (Color){ 255, 255, 255, 80 });
-
-    // Inner glow / reflection on bottom right
-    Rectangle bottomReflect = {
-        btn->rect.x + btn->rect.width * 0.4f,
-        btn->rect.y + btn->rect.height * 0.7f,
-        btn->rect.width * 0.5f,
-        btn->rect.height * 0.2f
-    };
-    DrawRectangleRounded(bottomReflect, 1.0f, SEGM, (Color){ 255, 255, 255, 30 });
+    DrawRectangleRounded(highlightRec, 1.0f, SEGM, (Color){ 255, 255, 255, 30 });
 
     // Draw Text
     Vector2 textSize = MeasureTextEx(font, btn->text, FONT_SIZE, 1);
