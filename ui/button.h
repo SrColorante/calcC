@@ -16,18 +16,33 @@ typedef struct {
     ButtonKind kind;
     const char* text;      // puntatore a stringa statica: niente copia
     Rectangle  rect;
-    float      press;      // 0..1, quanto e' premuto (animazione)
-    bool       hovered;
+
+    float press;           // 0..1, quanto e' premuto (molla)
+    float pressVel;        // velocita' della molla (da' il rimbalzo)
+    float hover;           // 0..1, sfumato: sollevamento + luminosita'
+    float flash;           // >0 se premuto da tastiera
+    float ripple;          // 0..1, avanzamento dell'onda di pressione
+    Vector2 rippleAt;      // origine dell'onda, coordinate schermo
+
+    bool  hovered;
 } Button;
 
-// Calcola il font size del tasto dalla sua altezza, cosi' il
-// testo resta proporzionato a qualunque dimensione di finestra.
-float ButtonFontSize(const Button* b);
+// Avanza le animazioni di un tasto verso il bersaglio corrente.
+// targetPress: 1 se il mouse e' premuto sopra, 0 altrimenti.
+void UpdateButtonAnim(Button* b, bool mouseDown, float dt);
 
-// Disegna un tasto: ombra, corpo, riflesso ed etichetta.
+// Fa partire l'onda di pressione (usata sia dal mouse sia dalla
+// tastiera, cosi' il feedback e' identico nei due casi).
+void FlashButtonPress(Button* b, Vector2 at);
+
+// Dimensione del font dell'etichetta, proporzionata al tasto.
+float ButtonFontSize(Rectangle rect);
+
+// Disegna il tasto. Con lo shader SDF e' un draw call; senza
+// shader ricade su DrawRectangleRounded.
 void DrawCalcButton(Button* b, Font font, const Theme* t);
 
-// Disegna l'etichetta centrata (usata anche dal display).
+// Etichetta centrata (allineamento ottico, un filo piu' in alto).
 void DrawCenteredText(Font font, const char* text, Rectangle box, float size, Color color);
 
 #endif

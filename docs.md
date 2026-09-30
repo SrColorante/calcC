@@ -1,714 +1,794 @@
-# Documentazione Assoluta Riga per Riga (docs.md)
+# calcC — Documentazione tecnica
 
-Di seguito l'intera codebase del progetto commentata in ogni sua riga per comprenderne appieno la logica.
+Riferimento approfondito per **calcC**, calcolatrice desktop in C su raylib con
+rendering SDF.
 
-## 1. `config.h`
-```c
-#ifndef CONFIG_H // Previene l'inclusione multipla del file (Include Guard)
-#define CONFIG_H // Definisce il token per l'Include Guard
+> **Snapshot:** i conteggi di righe e i riferimenti dell'appendice sono quelli
+> verificati sul sorgente corrente (660 in `main.c`, 364 in `ui/renderer.c`, 266 in
+> `ui/theme.c`, 169 in `ui/button.c`, 332 in `logic/eval.c`). `ui/renderer.c` e il
+> thread del tema sono l'aggiunta di questo intervento.
+>
+> Per una panoramica vedi [`README.md`](./README.md).
 
-#define SCREEN_WIDTH 400 // Definisce la larghezza di partenza della finestra a 400 pixel
-#define SCREEN_HEIGHT 600 // Definisce l'altezza di partenza della finestra a 600 pixel
-#define FONT_SIZE 24 // Dimensione di default per i testi dei bottoni
-#define SMUSS 0.45f // Livello di arrotondamento. 0.45 = bordi molto smussati
-#define SEGM 16 // Qualità dell'arrotondamento (numero di segmenti generati per curva)
+---
 
-#include "raylib.h" // Include le funzionalità della libreria grafica Raylib
-#include <stdbool.h> // Aggiunge il supporto per il tipo booleano in C standard (true/false)
+## Sommario
 
-// Funzione globale usata per rilevare se il sistema ha un tema dark o light
-static inline int IsSystemThemeDark() { // Viene usata la key 'static inline' per evitare conflitti di linking
-    // Apriamo un processo per interrogare gsettings, specifico per Gnome o simili (Wayland)
-    FILE *fp = popen("gsettings get org.gnome.desktop.interface color-scheme", "r"); 
-    if (!fp) return 1; // Se il comando fallisce, diamo per scontato che sia il tema Dark per sicurezza
-    char buffer[128]; // Buffer temporaneo per salvare l'output del comando
-    if (fgets(buffer, sizeof(buffer), fp) != NULL) { // Leggiamo il risultato ottenuto dal terminale
-        pclose(fp); // Chiudiamo subito il processo
-        // Se nel risultato troviamo la stringa "dark", ritorna 1 (vero), altrimenti 0
-        return (strstr(buffer, "dark") != NULL) ? 1 : 0; 
-    }
-    pclose(fp); // Chiudiamo il processo se non abbiamo letto nulla
-    return 1; // Default a Dark theme
-}
+1. [Che cos'è](#1-che-cosè)
+2. [Stack e build](#2-stack-e-build)
+3. [Architettura](#3-architettura)
+4. [`logic/eval.c` — il motore](#4-logicevalc--il-motore)
+5. [`ui/renderer.c` — il renderer SDF](#5-uirendererc--il-renderer-sdf)
+6. [`ui/theme.c` — il tema](#6-uithemec--il-tema)
+7. [`ui/button.c` — le animazioni](#7-uibuttonc--le-animazioni)
+8. [`main.c` — stato, layout, input](#8-mainc--stato-layout-input)
+9. [Il protocollo umano della calcolatrice](#9-il-protocollo-umano-della-calcolatrice)
+10. [Test](#10-test)
+11. [Benchmark](#11-benchmark)
+12. [Bug, limiti e codice morto](#12-bug-limiti-e-codice-morto)
+13. [Appendice](#13-appendice)
 
-#endif // Fine del blocco di Include Guard
+---
+
+## 1. Che cos'è
+
+Una calcolatrice scientifica **desktop**, non un gioco e non un generico
+"evaluator". L'evidente fra le parole `eval`/`EvaluateExpr` nel codice si
+riferisce alla valutazione di **espressioni matematiche**, non all'esecuzione di
+programmi. Il nome "calcC" è semplicemente "Calculator in C".
+
+Prova: `main.c:494` inizializza la finestra con il titolo `"Calculator"`, e
+`config.h` imposta 420×640 — le dimensioni di una calcolatrice a tastiera. La
+griglia `KEYS[5][4]` è la classica disposizione `C % / *` in testa, quattro righe
+di cifre, `=` a doppia altezza e `0` a doppia larghezza.
+
+L'obiettivo di design dichiarato nei commenti del codice è un'app che **si
+adatta bene a un compositor a tiling** come niri: tutto il layout è proporzionale
+alle dimensioni della finestra, e la finestra è trasparente con un inset di 1px
+per far emergere l'ombra dal compositore.
+
+---
+
+## 2. Stack e build
+
+### 2.1 Linguaggio
+
+**C11**, compilato come `-std=gnu11` perché `CMAKE_C_EXTENSIONS` è ON di default.
+Flag: `-Wall -Wextra`, **senza `-Werror`**. Nessun C++ nel progetto.
+
+### 2.2 CMake
+
+```cmake
+cmake_minimum_required(VERSION 3.14)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)   # solo CMake 4.x
+project(CalcC)
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra")
+set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)  # se non impostata
 ```
 
-## 2. `ui/button.h`
-```c
-#ifndef BUTTON_H // Include guard per button.h
-#define BUTTON_H // Definizione token include guard
+> **`CMAKE_POLICY_VERSION_MINIMUM` è una variabile di CMake 4.x**, sconosciuta alla
+> 3.x. È un workaround perché `FetchContent` deve poter consumare raylib 5.0, che
+> dichiara `cmake_minimum_required(VERSION 3.0)`. L'effetto pratico è che il
+> progetto è **CMake ≥ 4.0 soltanto**, nonostante la dichiarazione 3.14.
 
-#include "raylib.h" // Necessario per usare 'Rectangle' e 'Vector2'
+La cache mostra `CMAKE_PROJECT_VERSION:STATIC=3.4.0`, che è in realtà la versione
+di **GLFW** che trapela, non quella di CalcC.
 
-// Enum per definire tre possibili layout per i bottoni
-typedef enum { 
-    BTN_NORMAL, // Bottone standard quadrato 1x1
-    BTN_H_LONG, // Bottone allungato in orizzontale (es. il tasto '.')
-    BTN_V_LONG  // Bottone allungato in verticale (es. il tasto '=')
-} ButtonShape;
+### 2.3 Opzioni di build
 
-// Struttura che definisce ogni pulsante della UI
-typedef struct {
-    int grid_x; // Coordinata logica orizzontale sulla griglia
-    int grid_y; // Coordinata logica verticale sulla griglia
-    ButtonShape shape; // Il tipo di layout scelto per questo tasto
-    char text[8]; // Array di caratteri che contiene l'etichetta del bottone (es "9", "C", "%")
-    Rectangle rect; // Struct di Raylib che salva coordinate reali (x, y) e dimensioni (width, height)
-    bool is_hovered; // Flag impostato a true se il mouse ci passa sopra
-    bool is_pressed; // Flag impostato a true se l'utente ci ha cliccato
-    float visual_press_timer; // Timer che decresce per animare il tasto come premuto quando si usa la tastiera
-} Button; // Nome del tipo creato dalla struct
+| Impostazione | Effetto |
+|---|---|
+| `CMAKE_C_FLAGS += -Wall -Wextra` | Appende, non sostituisce |
+| `CMAKE_BUILD_TYPE` default `Release` | `-O3 -DNDEBUG` per l'app **e** per raylib |
+| `USE_WAYLAND ON` (FORCE) | Propagato a `GLFW_USE_WAYLAND` |
+| `USE_X11 OFF` (FORCE) | **Non ha effetto** — vedi §12.1 |
+| `BUILD_EXAMPLES OFF` | Cache di raylib |
+| `THREADS_PREFER_PTHREAD_FLAG` + `find_package(Threads)` | Per il thread del tema |
+| `target_include_directories(calcC PRIVATE . logic ui)` | La vecchia voce `graphics/` puntava a una directory inesistente |
+| `target_link_libraries(calcC PRIVATE raylib m Threads::Threads)` | `m` per `fmod`/`isnan` |
+| `URL_HASH SHA256=98f049b9…` | Verifica i 32 MB scaricati; prima mancava del tutto |
 
-// Dichiara la funzione di disegno del bottone passandogli i suoi dati, la posizione del mouse e il font da usare
-void DrawCalcButton(Button* btn, Vector2 mousePos, Font font);
+### 2.4 Dipendenze
 
-#endif // Fine Include Guard
+**raylib 5.0**, scaricato al configure via `FetchContent` e compilato come
+`libraylib.a` statico, con gli oggetti GLFW incorporati.
+
+> 🔴 **Prima non c'era nessun hash SHA256 sull'URL di download.** Ora
+> `FetchContent_Declare` lo dichiara esplicitamente, quindi il configure rifiuta un
+> archivio diverso da quello pubblicato per il tag `5.0`.
+
+**GLFW 3.4.0** incluso in raylib, con supporto Wayland, X11, EGL, OSMesa e Null.
+Definizioni di compilazione osservate: `-DGRAPHICS_API_OPENGL_33 -DPLATFORM_DESKTOP`.
+
+Librerie di sistema risolte al configure: `libGL.so`, `libGLX.so`, `librt.a`,
+`libfreetype.so`, `libfontconfig.so`, `libdl`, `libpthread`.
+
+---
+
+## 3. Architettura
+
+```
+                    ┌──────────────────────────────────────┐
+                    │              main.c (637)           │
+                    │  KEYS[5][4]  ← unica fonte di verità│
+                    │  PressKey()   ← semantica           │
+                    │  UpdateLayout() ← layout proporz.  │
+                    │  PressKey / tastiera / mouse         │
+                    └───┬───────────────────┬──────────┬───┘
+                        │                   │          │
+              ┌─────────▼──────┐  ┌─────────▼────┐  ┌──▼──────────┐
+              │ logic/eval.c   │  │ ui/button.c  │  │ ui/theme.c  │
+              │ 329            │  │ 169          │  │ 229         │
+              │ token list     │  │ molla, hover │  │ palette     │
+              │ pool 4096      │  │ ripple       │  │ thread      │
+              │ shunting-yard  │  └──────┬───────┘  └──────┬──────┘
+              └────────────────┘         │                 │
+                                   ┌────▼─────────────────▼───┐
+                                   │      ui/renderer.c       │
+                                   │  2 shader GLSL 330       │
+                                   │  + fallback CPU          │
+                                   └──────────────────────────┘
 ```
 
-## 3. `ui/button.c`
+| Modulo | Linee di confine |
+|---|---|
+| `logic/eval.c` | Solo aritmetica. Nessuna conoscenza di finestre, colori o input |
+| `ui/theme.c` | Rilevamento e palette. Non sa nulla della calcolatrice |
+| `ui/button.c` | Animazione e disegno di un singolo pulsante |
+| `ui/renderer.c` | Primitive SDF pure. Non sa nulla dei pulsanti |
+| `main.c` | Tutto il resto: stato, layout, semantica, input, main loop |
+
+---
+
+## 4. `logic/eval.c` — il motore
+
+### 4.1 Rappresentazione: lista di token, non di numeri
+
 ```c
-#include "button.h" // Include la dichiarazione della struct Button
-#include "../config.h" // Include le macro (SMUSS) e IsSystemThemeDark
-#include <math.h> // Libreria matematica per funzioni grafiche base
+typedef enum { NODE_DIGIT, NODE_VALUE, NODE_OP } NodeType;
 
-void DrawCalcButton(Button* btn, Vector2 mousePos, Font font) { // Corpo della funzione di rendering
-    // Controlliamo in tempo reale se il sistema operativo sta usando il tema scuro
-    bool isDark = (IsSystemThemeDark() == 1);
-    
-    // Impostiamo il colore di base (design flat/minimalista). Variamo in base a tema Scuro o Chiaro. (Alpha 180 = traslucido)
-    Color bodyColor = isDark ? (Color){ 40, 45, 55, 180 } : (Color){ 210, 220, 230, 180 };
-    
-    // Tinta personalizzata arancione solo per il bottone di cancellazione
-    if (strcmp(btn->text, "C") == 0) {
-        bodyColor = isDark ? (Color){ 200, 100, 30, 180 } : (Color){ 240, 120, 40, 180 };
-    }
-    
-    if (btn->is_hovered) { // Se il mouse ci passa sopra
-        // Schiariamo leggermente rendendo più opaco (Alpha 200)
-        if (strcmp(btn->text, "C") == 0) bodyColor = isDark ? (Color){ 220, 120, 40, 200 } : (Color){ 250, 140, 60, 200 };
-        else bodyColor = isDark ? (Color){ 60, 65, 75, 200 } : (Color){ 230, 240, 250, 200 };
-    }
-    
-    // Se il tasto è fisicamente cliccato col mouse OPPURE animato tramite tastiera
-    if (btn->is_pressed || btn->visual_press_timer > 0.0f) {
-        // Il bottone diventa ancora più luminoso e denso
-        if (strcmp(btn->text, "C") == 0) bodyColor = isDark ? (Color){ 240, 140, 50, 230 } : (Color){ 255, 160, 80, 230 };
-        else bodyColor = isDark ? (Color){ 80, 90, 110, 230 } : (Color){ 190, 210, 230, 230 };
-    }
-
-    // Disegniamo la massa principale del pulsante. Raggio 1.0f = tondo perfetto.
-    DrawRectangleRounded(btn->rect, 1.0f, SEGM, bodyColor);
-
-    // Calcoliamo lo spazio occupato dall'etichetta testuale usando il nostro font Comfortaa
-    Vector2 textSize = MeasureTextEx(font, btn->text, FONT_SIZE, 1);
-    
-    // Matematica di centratura: coordinate bottone + (metà della larghezza rimasta dopo aver tolto il testo)
-    Vector2 textPos = {
-        btn->rect.x + (btn->rect.width - textSize.x) / 2.0f,
-        btn->rect.y + (btn->rect.height - textSize.y) / 2.0f
-    };
-    // Scegliamo bianco o nero per il testo a seconda del tema di sistema per garantire leggibilità
-    Color textColor = isDark ? WHITE : BLACK;
-    // Disegniamo il testo sul monitor usando la posizione, dimensione e spaziatura calcolata
-    DrawTextEx(font, btn->text, textPos, FONT_SIZE, 1, textColor);
-}
-```
-
-## 4. `logic/eval.h`
-```c
-#ifndef EVAL_H // Prevenzione inclusione multipla
-#define EVAL_H // Token guard
-
-#include <stdbool.h> // Permette il tipo bool
-
-// Definisce quali tipologie di dati un nodo può ospitare: numeri oppure operatori matematici
-typedef enum {
-    NODE_NUM,
-    NODE_OP
-} NodeType;
-
-// Definizione del nodo stesso, base dell'Albero/Lista concatenata
 typedef struct ExprNode {
-    NodeType type; // Il tipo di contenuto: NODE_NUM o NODE_OP
-    union { // Usiamo una 'union' per salvare RAM: il nodo conterrà O un int O un char (condividono stessa memoria)
-        int n; // Memorizza la singola cifra
-        char op; // Memorizza il simbolo dell'operatore (es. '+')
-    };
-    struct ExprNode* next; // Puntatore all'elemento successivo della lista
+    NodeType type;
+    double   val;      // cifra 0-9, oppure un double pronto, oppure il codice ASCII
+    struct ExprNode* next;
 } ExprNode;
 
-// Dichiarazione delle funzioni esportate dal motore logico
-void AppendOp(ExprNode** head, char op); // Aggiunge operatore in coda alla lista
-void AppendNum(ExprNode** head, int n); // Aggiunge cifra in coda
-void PopNode(ExprNode** head); // Rimuove l'ultimo nodo (per il tasto Cancella)
-void ClearExpr(ExprNode** head); // Svuota e dealloca intera lista
-ExprNode* CopyExpr(ExprNode* head); // Duplica l'intera lista per salvare i dati in Cronologia
-double EvaluateExpr(ExprNode* head, bool* error); // Algoritmo per risolvere l'espressione (ritorna double e setta l'errore)
-void ExprToString(ExprNode* head, char* buffer, int max_len); // Traduce la lista concatenata in una stringa visibile
-
-extern double lastResult; // Espone globalmente l'ultimo risultato salvato per essere inniettato (la logica "Ans")
-
-#endif // Chiusura header
+typedef struct {
+    ExprNode *head;
+    ExprNode *tail;     // append O(1)
+    int       count;    // controllo del limite O(1)
+} Expr;
 ```
 
-## 5. `logic/eval.c`
+L'idea di progetto decisiva: un **numero non è un nodo**. `12.5` è cinque nodi
+(`1`, `.`, `2`, `.`, `5`); i numeri vengono composti in un `double` al momento
+della valutazione. `NODE_VALUE` è la valoche che permette a un `double` già
+calcolato (il valore di `Ans`) di stare nello stream come singolo atomo.
+
+`tail` e `count` esistono per una ragione precisa, documentata nell'header:
+prima ogni `Append*` percorreva l'intera lista, rendendo la costruzione **O(n²)**.
+
+### 4.2 Pool di nodi
+
 ```c
-#include "eval.h"
-#include <stdlib.h> // Libreria per l'allocazione dinamica della memoria (malloc, free)
-#include <stdio.h> // Standard I/O (snprintf)
-#include <string.h> // Gestione stringhe (strcat, strlen)
-#include <math.h> // Necessario per l'operatore fmod (Modulo)
-
-void AppendOp(ExprNode** head, char op) { // Crea e inserisce un nodo Operatore in coda
-    ExprNode* node = (ExprNode*)malloc(sizeof(ExprNode)); // Alloca RAM dinamicamente per il nodo
-    node->type = NODE_OP; // Setta il tipo
-    node->op = op; // Salva il carattere (es '+')
-    node->next = NULL; // Il nuovo nodo è il capolinea
-    if (!*head) *head = node; // Se la lista è vuota, il nuovo nodo diventa la testa
-    // Altrimenti, scorriamo i nodi fino ad arrivare in fondo e attacchiamo il nuovo nodo alla coda
-    else { ExprNode* curr = *head; while (curr->next) curr = curr->next; curr->next = node; }
-}
-
-void AppendNum(ExprNode** head, int n) { // Crea e inserisce un nodo Numero (cifra singola)
-    ExprNode* node = (ExprNode*)malloc(sizeof(ExprNode)); // Alloca RAM
-    node->type = NODE_NUM; // Setta il tipo
-    node->n = n; // Salva la cifra singola (0-9)
-    node->next = NULL; // Capolinea
-    if (!*head) *head = node; // Se lista vuota, diventa testa
-    // Altrimenti scorre fino in fondo e lo appende
-    else { ExprNode* curr = *head; while (curr->next) curr = curr->next; curr->next = node; }
-}
-
-double lastResult = 0.0; // Inizializza a zero la variabile globale del risultato
-
-void ClearExpr(ExprNode** head) { // Svuota la lista ed evita Memory Leaks
-    ExprNode* curr = *head; // Punta al primo nodo
-    while (curr) { // Finché ci sono nodi validi
-        ExprNode* next = curr->next; // Salva la reference al successivo
-        free(curr); // Distrugge liberando la RAM dell'attuale
-        curr = next; // Avanza al nodo salvato
-    }
-    *head = NULL; // Resetta il puntatore originale a NULL! Importantissimo.
-}
-
-ExprNode* CopyExpr(ExprNode* head) { // Deep Copy: clona l'albero nodo per nodo
-    if (!head) return NULL; // Ritorna NULL per alberi vuoti
-    ExprNode* newHead = NULL; // Crea testa locale
-    ExprNode* curr = head; // Copia il reference dell'albero di origine
-    while (curr) { // Per ogni nodo...
-        if (curr->type == NODE_NUM) AppendNum(&newHead, curr->n); // Duplica usando la logica del motore se numero
-        else AppendOp(&newHead, curr->op); // Duplica se operatore
-        curr = curr->next; // Scorre
-    }
-    return newHead; // Ritorna l'albero gemello allocato in RAM separata (utile per la History)
-}
-
-void PopNode(ExprNode** head) { // Backspace logico (cancella solo 1 nodo)
-    if (!*head) return; // Niente da fare se vuoto
-    if (!(*head)->next) { // Se l'albero ha 1 SOLO nodo
-        free(*head); // Lo libera
-        *head = NULL; // Lo svuota del tutto
-        return;
-    }
-    ExprNode* curr = *head; // Parte dalla testa
-    while (curr->next && curr->next->next) { // Scorre finché NON trova il penultimo nodo
-        curr = curr->next; 
-    }
-    free(curr->next); // Il penultimo nodo dealloca il suo "next" (l'ultimo nodo della lista)
-    curr->next = NULL; // Il penultimo nodo adesso non ha più figli e diventa a tutti gli effetti l'ultimo
-}
-
-double EvaluateExpr(ExprNode* head, bool* error) { // Motore risolutivo
-    *error = false; // Presuppone successo
-    if (!head) return 0; // Lista vuota = 0
-    
-    // Dobbiamo estrarre la Lista Concatenata e convertirla in Array per fare i calcoli più comodamente
-    double vals[100]; // Conterrà tutti i numeri uniti (Es. nodi [1, ., 5] -> double 1.5)
-    char ops[100]; // Conterrà gli operatori
-    int v_count = 0, o_count = 0; // Quantità estratti
-    
-    ExprNode* curr = head; // Puntatore di scansione
-    while (curr) { // Finché c'è un nodo...
-        // Se troviamo un numero o un Punto decimale...
-        if (curr->type == NODE_NUM || (curr->type == NODE_OP && curr->op == '.')) {
-            double val = 0; // Accumulatore
-            double decimal_mult = 1; // Moltiplicatore decimale (diventa 0.1, 0.01)
-            bool in_decimal = false; // Flag se siamo post-virgola
-            
-            // Finché troviamo consecutivamente numeri o punti...
-            while (curr && (curr->type == NODE_NUM || (curr->type == NODE_OP && curr->op == '.'))) {
-                if (curr->type == NODE_OP && curr->op == '.') {
-                    in_decimal = true; // Sblocca flag decimale
-                } else if (curr->type == NODE_NUM) { // È una cifra intera
-                    if (!in_decimal) val = val * 10 + curr->n; // Sposta di base (es. accumulato 1, arriva 5 -> 1*10+5 = 15)
-                    else { // Se post virgola
-                        decimal_mult /= 10.0; // Scaliamo di decimi
-                        val = val + curr->n * decimal_mult; // 15 + (5 * 0.1) = 15.5
-                    }
-                }
-                curr = curr->next; // Scorre i nodi agglomerandoli
-            }
-            vals[v_count++] = val; // Inserisce il numero finale condensato in vals
-        } else { // Se era solo un operatore puro (+, *, -, /)
-            ops[o_count++] = curr->op; // Viene registrato in ops
-            curr = curr->next;
-        }
-    }
-    
-    // Validation sintattica (Syntax Error). Se zero numeri ma N operatori o Operatori >= Numeri 
-    // Esempio "1+*", avremo 1 val (v_count) e 2 op (+ e *). 2 >= 1 -> ERRORE!
-    if (v_count == 0 && o_count > 0) { *error = true; return 0; }
-    if (o_count >= v_count) { *error = true; return 0; }
-    
-    // RISOLUZIONE: MOLTIPLICAZIONI, DIVISIONI E MODULI (Hanno priorità matematica, le facciamo prima)
-    for (int i=0; i<o_count; i++) { // Scorriamo l'array operatori 
-        if (ops[i] == '*' || ops[i] == '/' || ops[i] == '%') { // Trovato calcolo prioritario
-            if (ops[i] == '*') vals[i] = vals[i] * vals[i+1]; // Risolve
-            if (ops[i] == '/') {
-                if (vals[i+1] == 0) { *error = true; return 0; } // DIVISION BY ZERO = MATH ERROR
-                vals[i] = vals[i] / vals[i+1]; // Risolve
-            }
-            if (ops[i] == '%') { // Modulo (Resto)
-                if (vals[i+1] == 0) { *error = true; return 0; }
-                vals[i] = fmod(vals[i], vals[i+1]); // fmod fa il calcolo modulo sui floating point in C
-            }
-            // Collassiamo gli array riempiendo il buco dei valori risolti (es. l'1 e 2 si fondono, il 3 scala giù)
-            for (int j=i+1; j<v_count-1; j++) vals[j] = vals[j+1];
-            for (int j=i; j<o_count-1; j++) ops[j] = ops[j+1]; // L'operatore sparito fa scorrere gli altri
-            v_count--; o_count--; i--; // Decrementiamo i contatori di loop e array
-        }
-    }
-    
-    // RISOLUZIONE: ADDIZIONI E SOTTRAZIONI (Senza più rischio di violare BODMAS)
-    for (int i=0; i<o_count; i++) {
-        if (ops[i] == '+' || ops[i] == '-') {
-            if (ops[i] == '+') vals[i] = vals[i] + vals[i+1]; // Risolve e salva al posto del primo termine
-            if (ops[i] == '-') vals[i] = vals[i] - vals[i+1];
-            // Collassa il resto dell'array identico a sopra
-            for (int j=i+1; j<v_count-1; j++) vals[j] = vals[j+1];
-            for (int j=i; j<o_count-1; j++) ops[j] = ops[j+1];
-            v_count--; o_count--; i--;
-        }
-    }
-    
-    if (v_count > 0) return vals[0]; // Restituisce l'unico numero scampato (Il risultato finale!)
-    return 0; // Fail-safe
-}
-
-// Stampa la lista concatenata a video per poterla mostrare
-void ExprToString(ExprNode* head, char* buffer, int max_len) {
-    buffer[0] = '\0'; // Resetta il buffer per evitare memorie fantasma passate
-    ExprNode* curr = head; // Parte dall'albero
-    while (curr) { // Per ogni nodo
-        char temp[32]; // Crea testo temporaneo del singolo nodo
-        // Usa snprintf che protegge dai buffer overflow per scrivere la stringa convertita
-        if (curr->type == NODE_NUM) snprintf(temp, sizeof(temp), "%d", curr->n);
-        else {
-            if (curr->op == 's') snprintf(temp, sizeof(temp), "sqrt("); // Codice fallback obsoleto
-            else snprintf(temp, sizeof(temp), "%c", curr->op);
-        }
-        // Se unendo buffer + temporaneo stiamo sotto la memoria consentita, concatena
-        if (strlen(buffer) + strlen(temp) < (size_t)max_len) strcat(buffer, temp);
-        curr = curr->next; // Avanza
-    }
-}
+static ExprNode g_pool[NODE_POOL_SIZE];   // 4096
+static ExprNode* g_freeList = NULL;
+static int g_liveNodes = 0;
 ```
 
-## 6. `main.c`
+`PoolInit()` infila l'intero array statico in una free list collegata. `NodeAlloc()`
+estrae la testa, `NodeFree()` la reinserisce. **O(1), nessuna `malloc`, nessuna
+frammentazione, nessuna syscall.** È il sostituto deliberato del vecchio disegno
+con una `malloc` per token.
+
+**Dimensionamento:** `EXPR_MAX_NODES = 160` per espressione × 20 slot di
+cronologia + 1 viva = 3216 massimo, contro un pool di 4096: circa 880 nodi di
+margine. `eval_test.c` verifica esplicitamente 40 espressioni da 20 nodi
+simultanee.
+
+> **L'esaurimento tronca silenziosamente.** `PushNode` restituisce `NULL` e i
+> chiamanti scartano il token, con il commento *"pool esaurito: ignora (nessun
+> crash)"*. Il pool è un tetto rigido con troncamento silenzioso, non un errore.
+> Con i valori attuali non è raggiungibile nell'uso normale.
+
+### 4.3 Complessità per operazione
+
+| Funzione | Complessità | Note |
+|---|---|---|
+| `ExprDigit` / `ExprValue` / `ExprOp` | **O(1)** | `tail` + `count` |
+| `ExprCount` | **O(1)** | Era O(n) |
+| `ExprToString` | **O(n)** | Cursore + `memcpy`; rimpiazzato `strcat` che era O(n²) |
+| `EvaluateExpr` | **O(n)** | Shunting-yard, singola passata |
+| `ExprClear` | O(n) | Dealloca ogni nodo |
+| `ExprPop` | O(n) | Cammina fino al penultimo; lista non doppiamente collegata |
+| `ExprCopy` | O(n) | Copia profonda in nodi freschi |
+| `FormatNumber` | O(1) | `snprintf` + rimozione degli zeri |
+
+`ExprPop` O(n) significa che un backspace fino a vuoto su un'espressione da 160
+token costa O(n²) ≈ 12 800 passi. Irrilevante a questa scala.
+
+### 4.4 `EvaluateExpr` — lo shunting-yard
+
+Due array a dimensione fissa, entrambi `EXPR_MAX_NODES`:
+
 ```c
-#include "raylib.h"
-#include "config.h"
-#include "ui/button.h"
-#include "logic/eval.h"
-#include <stdio.h>
-#include <string.h>
-
-#define NUM_BUTTONS 20 // Quanti bottoni massimi supporta la griglia
-Button buttons[NUM_BUTTONS]; // Crea l'array per salvarne i dati
-ExprNode* exprList = NULL; // Puntatore Radice / Testa del parser espressioni. Parte a NULL.
-char displayBuffer[256] = ""; // Stringa di testo dove salvare l'espressione da mostrare su schermo
-char resultBuffer[256] = ""; // Stringa di testo dove salvare il risultato calcolato da mostrare in verde
-
-// Stati usati nel Game Loop per governare animazioni
-float animSlideUp = 0.0f; // Misura lo slancio verticale dei calcoli (da 0.0 a 1.0)
-bool isResultState = false; // Vero se l'utente ha calcolato il risultato
-float popAnim = 0.0f; // Moltiplicatore rimbalzo testo per feedback meccanico
-int lastDisplayLen = 0; // Memorizza quanto era lungo il testo un frame fa per scatenare animazioni
-
-// Trova un bottone in base al testo e imposta il suo timer
-void TriggerButtonVisual(const char* label) {
-    for (int i=0; i<NUM_BUTTONS; i++) { // Scorre i 20 bottoni
-        if (strcmp(buttons[i].text, label) == 0) { // Controlla uguaglianza
-            buttons[i].visual_press_timer = 0.15f; // Lo farà rimanere illuminato per 150 millisecondi
-            break; // Ottimizzazione per uscire dal loop quando lo troviamo
-        }
-    }
-}
-
-// Layout Dinamico (Risponde in tempo reale al tiling di Wayland)
-void UpdateLayout(void) {
-    float sw = GetScreenWidth(); // Larghezza della finestra al frame corrente 
-    float sh = GetScreenHeight(); // Altezza effettiva al frame
-    
-    float displayHeight = sh * 0.25f; // Il display LCD riserva 25% del monitor
-    float marginX = sw * 0.05f; // Margine Orizzontale al 5%
-    float marginY = sh * 0.05f; // Margine Verticale 5%
-    
-    // Distanziamo l'inizio dei bottoni per non collidere mai col display
-    float buttonsStartY = displayHeight + marginY + (sh * 0.03f); 
-    float buttonsAreaHeight = sh - buttonsStartY - marginY;
-    
-    float availableWidth = sw - 2*marginX; // La larghezza sfruttabile della griglia
-    float pad = sh * 0.02f; // Distanza dinamica proporzionale allo schermo
-    
-    // Calcolo massimo per mantenere le proporzioni
-    float max_w = (availableWidth - 3*pad) / 4.0f;
-    float max_h = (buttonsAreaHeight - 4*pad) / 5.0f;
-    
-    // Forza i pulsanti ad essere quadrati (cerchi perfetti in arrotondamento 1.0f)
-    float size = (max_w < max_h) ? max_w : max_h;
-    
-    // Centra l'intera griglia calcolatrice nello schermo Wayland deformato
-    float gridWidth = 4 * size + 3 * pad;
-    float gridHeight = 5 * size + 4 * pad;
-    
-    float startX = marginX + (availableWidth - gridWidth) / 2.0f;
-    float startY = buttonsStartY + (buttonsAreaHeight - gridHeight) / 2.0f;
-    
-    // Mappatura fissa 2D testuale della nostra tastiera (Notare i null negli spot speciali vuoti)
-    const char* labels[5][4] = {
-        {"C", "%", "*", "/"},
-        {"7", "8", "9", "-"},
-        {"4", "5", "6", "+"},
-        {"1", "2", "3", "="},
-        {"0", ".", "", ""} 
-    };
-    
-    int btn_idx = 0; // Cursore per avanzare nell'array di struct bottoni reali
-    for (int r = 0; r < 5; r++) { // 5 Righe
-        for (int c = 0; c < 4; c++) { // 4 Colonne
-            if (r == 4 && c == 2) continue; // Salta il vuoto per colpa di .= (prendono 2 spot)
-            if (r == 4 && c == 3) continue; // Salta l'altro vuoto
-            
-            buttons[btn_idx].grid_x = c; // Salva logica
-            buttons[btn_idx].grid_y = r; // Salva logica
-            strcpy(buttons[btn_idx].text, labels[r][c]); // Copia l'etichetta
-            
-            // X: offset iniziale + salto colonna *(Larghezza bottone + Margine)
-            float bx = startX + c * (w + pad); 
-            float by = startY + r * (h + pad);
-            
-            if (r == 4 && c == 1) { // Caso speciale: lo Zero
-                buttons[btn_idx].shape = BTN_H_LONG; // Tasto extra largo!
-                buttons[btn_idx].rect = (Rectangle){ bx, by, w*2 + pad, h }; // Eredita la forma x2+margine
-            } else if (r == 3 && c == 3) { // Caso speciale: L'Uguale
-                buttons[btn_idx].shape = BTN_V_LONG; // Tasto extra Alto!
-                buttons[btn_idx].rect = (Rectangle){ bx, by, w, h*2 + pad };
-            } else {
-                buttons[btn_idx].shape = BTN_NORMAL; // Gocce standard
-                buttons[btn_idx].rect = (Rectangle){ bx, by, w, h };
-            }
-            btn_idx++; // Passa allo spot successivo
-        }
-    }
-}
-
-// 20 Slot per salvare le espressioni digitate e recuperarle con frecce SU/GIÙ
-#define MAX_HISTORY 20
-ExprNode* history[MAX_HISTORY] = {0}; // Vettore di alberi logici inizializzati a NULL (0)
-int history_count = 0; // Quanti slot sono riempiti
-int history_idx = -1; // Indice del quale stiamo visualizzando
-
-// La funzione Ans: Logica complessa che decide quando un bottone avvia un calcolo nuovo o usa il risultato del precedente
-void HandleAnsLogic(bool is_operator, char ch, int num) {
-    char lbl[2] = {0, 0}; // Vettore testuale per estrarre la label
-    if (num != -1) { // Se stiamo analizzando un numero
-        lbl[0] = '0' + num; // Converte Int a Stringa usando Ascii
-        TriggerButtonVisual(lbl); // Simula pressione bottone visivo!
-    } else if (ch != '\0') { // Se è un operatore (in formato Char)
-        lbl[0] = ch; // Appende il char all'array
-        TriggerButtonVisual(lbl); // Simula pressione
-    }
-
-    if (isResultState) { // Se il programma aveva un calcolo concluso (schermo verde e testo alzato)
-        if (history_count < MAX_HISTORY) { // Se c'è spazio nello storico
-            history[history_count++] = CopyExpr(exprList); // Duplica l'albero con CopyExpr e lo salva
-            history_idx = history_count; // Riporta indice storico al fondo
-        } else { // Se la cronologia è piena, "Shifta" l'array
-            ClearExpr(&history[0]); // Cancella il ricordo più vecchio distruggendolo
-            for (int i=1; i<MAX_HISTORY; i++) history[i-1] = history[i]; // Sposta tutti indietro di 1 
-            history[MAX_HISTORY-1] = CopyExpr(exprList); // Sbatte l'ultimo clone alla fine
-            history_idx = MAX_HISTORY; // Indice allineato
-        }
-
-        if (is_operator) { // Se ho premuto + DOPO un Risultato
-            ClearExpr(&exprList); // Cancella l'espressione, ma dobbiamo riniettare Ans!
-            char ansStr[64];
-            snprintf(ansStr, sizeof(ansStr), "%g", lastResult); // %g parsa i Float eliminando gli zero inutili
-            if (lastResult < 0) AppendNum(&exprList, 0); // Hack Fix: Se il risultato precedente era -5, inietta uno '0' per risolvere "0-5" al posto del "-" puro che spacca BODMAS.
-            for (size_t i=0; i<strlen(ansStr); i++) { // Ricrea il parser della stringa simulando la digitazione manuale dell'utente! 
-                if (ansStr[i] == '.') AppendOp(&exprList, '.');
-                else if (ansStr[i] == '-') AppendOp(&exprList, '-');
-                else if (ansStr[i] >= '0' && ansStr[i] <= '9') AppendNum(&exprList, ansStr[i] - '0');
-            }
-            if (ch != '\0') AppendOp(&exprList, ch); // Conclude attaccando il "+" (o altro) finale dell'operatore che ha scatenato la condizione
-        } else { // Se ho premuto 5 DOPO un Risultato
-            ClearExpr(&exprList); // Capisce che non ti interessava Ans
-            if (num != -1) AppendNum(&exprList, num); // E comincia inserendo subito la tua cifra per un nuovo calcolo!
-            else if (ch != '\0') AppendOp(&exprList, ch);
-        }
-        isResultState = false; // Resetta lo stato di vittoria (Result = off)
-        strcpy(resultBuffer, ""); // Svuota lo string del display verde
-    } else { // Se è normale utilizzo (non c'è alcun = stato eseguito)
-        if (num != -1) AppendNum(&exprList, num); // Aggiungi brutalmente il numero...
-        else if (ch != '\0') AppendOp(&exprList, ch); // O il tasto alla coda.
-    }
-}
-
-// Scansiona Eventi Tastiera 
-void HandleKeyboardInput() {
-    int key = GetKeyPressed(); // Cerca tasti controllo e speciali
-    while (key != 0) { // Finché il buffer Raylib è sporco
-        // KEY REPEAT ATTIVO PER BACKSPACE E CANC! (Fondamentale in Wayland)
-        if (key == KEY_BACKSPACE || IsKeyPressedRepeat(KEY_BACKSPACE)) { 
-            if (isResultState) { // Se l'ho fatto DOPO aver calcolato un risultato
-                isResultState = false; // Semplice svuotamento
-                strcpy(resultBuffer, "");
-            } else {
-                PopNode(&exprList); // Cancella l'ultimo pezzo usando la funzione Pop sicura di eval.c
-            }
-        } else if (key == KEY_C || key == KEY_DELETE) { // Cancellare TUTTO
-            ClearExpr(&exprList);
-            strcpy(resultBuffer, "");
-            isResultState = false;
-            TriggerButtonVisual("C"); // Illumina la bolla C
-        // Se premi invio in un qualsiasi format della tua tastiera
-        } else if (key == KEY_ENTER || key == KEY_KP_ENTER || key == KEY_EQUAL || key == KEY_KP_EQUAL) {
-            bool err;
-            lastResult = EvaluateExpr(exprList, &err); // Lancia il Motore Matematico!
-            if (err) strcpy(resultBuffer, "Error"); // Syntax error
-            else snprintf(resultBuffer, sizeof(resultBuffer), "%g", lastResult); // Success
-            isResultState = true; // Sblocca layout vittorioso
-            animSlideUp = 0.0f; // Azzerra l'animazione per farla ripartire da sotto verso il centro
-            TriggerButtonVisual("=");
-        } else if (key == KEY_UP) { // Freccia SU: Torna nel Passato!
-            if (history_count > 0 && history_idx > 0) {
-                history_idx--; // Sposta indietro la telecamera
-                ClearExpr(&exprList); // Cancella
-                exprList = CopyExpr(history[history_idx]); // E popola clonando la storia a questo frame!
-                isResultState = false;
-                strcpy(resultBuffer, "");
-            }
-        } else if (key == KEY_DOWN) { // Freccia GIÙ: Avanza verso i calcoli del Futuro
-            if (history_idx < history_count - 1) { // Idem, ma a salire
-                history_idx++;
-                ClearExpr(&exprList);
-                exprList = CopyExpr(history[history_idx]);
-                isResultState = false;
-                strcpy(resultBuffer, "");
-            } else if (history_idx == history_count - 1) { // Se arrivi in cima, pulisci per il foglio bianco
-                history_idx++;
-                ClearExpr(&exprList);
-                isResultState = false;
-                strcpy(resultBuffer, "");
-            }
-        }
-        key = GetKeyPressed(); // Assorbe il key per non iterare all'infinito
-    }
-    
-    // Per gestire il fastidioso comportamento del "Tengo premuto Shift e premiamo 7 -> esce / ma la calcolatrice inserisce 7 e /"
-    // Ho bypassato l'inserimento fisico usando la via del CharPressed Unicode (il SO di sistema gestisce già il demultiplex dei Keycodes unendoli)
-    int ch = GetCharPressed();
-    while (ch > 0) {
-        if (ch >= '0' && ch <= '9') HandleAnsLogic(false, '\0', ch - '0'); // Se era numero (senza shift)
-        else if (ch == '+' || ch == '-' || ch == '*' || ch == '/' || ch == '%') HandleAnsLogic(true, (char)ch, -1);
-        else if (ch == '.') { // Se ci serve la virgola
-            HandleAnsLogic(false, (char)ch, -1);
-        }
-        ch = GetCharPressed();
-    }
-}
-
-// Viene scatenato quando il Mouse Clicca e rilascia uno dei bottoni. Stessa logica della tastiera (Mappata a HandleAnsLogic e EvaluateExpr!)
-void HandleButtonPress(Button* b) {
-    if (strcmp(b->text, "=") == 0) {
-        bool err;
-        lastResult = EvaluateExpr(exprList, &err);
-        if (err) strcpy(resultBuffer, "Error");
-        else snprintf(resultBuffer, sizeof(resultBuffer), "%g", lastResult);
-        isResultState = true;
-        animSlideUp = 0.0f;
-    } else {
-        if (b->text[0] >= '0' && b->text[0] <= '9') {
-            HandleAnsLogic(false, '\0', b->text[0] - '0');
-        } else if (strcmp(b->text, ".") == 0) {
-            HandleAnsLogic(false, '.', -1);
-        } else if (strcmp(b->text, "%") == 0) {
-            HandleAnsLogic(true, '%', -1);
-        } else if (strcmp(b->text, "C") == 0) {
-            ClearExpr(&exprList);
-            strcpy(resultBuffer, "");
-            isResultState = false;
-        } else {
-            HandleAnsLogic(true, b->text[0], -1);
-        }
-    }
-}
-
-int main() { // Entry point
-    // Applica RESIZABLE per combattere chi cerca di ingabbiare l'app (Tiling WM). 
-    // Applica VSYNC per usare l'engine mailbox di Wayland che ferma i tearing grafici.
-    // Applica MSAA 4X HINT per antialiasing sulle ellissi per non vederne le scalettature
-    SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT);
-    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Calculator"); // Lancia finestra!
-    
-    if (!IsWindowReady()) { // Se fallisce crashiamo e comunichiamo in log
-        printf("Error: Failed to initialize window.\n");
-        return 1;
-    }
-    
-    UpdateLayout(); // Genera i quadrati la PRIMISSIMA VOLTA
-    
-    // Passiamo un font Google! È importante mettere 0,0 alla fine che indica a raylib di usare tutti i Charset Unicode nativi del TTF (non limitarsi al latin!)
-    Font customFont = LoadFontEx("assets/Comfortaa.ttf", 64, 0, 0);
-    
-    while (!WindowShouldClose()) { // Loop infinito Game Engine
-        if (IsKeyPressed(KEY_ESCAPE)) break; // Esce in sicurezza se Escape!
-        
-        // Se qualcuno, come il mouse o Niri (il window manager) ci ha ridimensionati o forzati...
-        if (IsWindowResized()) UpdateLayout(); // ... Ricalcola la griglia logica per centrare il tutto!
-        
-        // IMPORTANTISSIMO! GetFrameTime calcola letteralmente la frazione di millisecondi (in virgola mobile) passati dal precedente Game Loop. 
-        // Lavorando in questo modo, un operazione X che richiede (0.15s), scalando il valore di "dt", si concluderà nello stesso momento (0.15s di vita reale)
-        // a PRESCINDERE che il tuo monitor giri a 60 hz, 144 hz, o se il processore laggasse per mezzo secondo. (Frame-Independent Time Scale).
-        float dt = GetFrameTime(); 
-        Vector2 mouse = GetMousePosition(); // Intercetta X e Y del mouse passata da Wayland
-        
-        HandleKeyboardInput(); // Legge Buffer Input
-        
-        for (int i=0; i<NUM_BUTTONS; i++) { // Scorre iteratori UI
-            if (buttons[i].text[0] == '\0') continue; // Salta iteratore nullo 
-            
-            // Applica il decadimento (usando il delta temporale 'dt'!) in modo costante del timer visuale premuto
-            if (buttons[i].visual_press_timer > 0.0f) {
-                buttons[i].visual_press_timer -= dt;
-            }
-            
-            buttons[i].is_pressed = false;
-            // Controlla se il mouse Logico passa sopra il Rettangolo del nostro UI Button Layout
-            buttons[i].is_hovered = CheckCollisionPointRec(mouse, buttons[i].rect);
-            if (buttons[i].is_hovered) { // Se entra nel raggio d'azione 
-                if (IsMouseButtonDown(MOUSE_LEFT_BUTTON)) { // Down serve a tenere schiacciato graficamente
-                    buttons[i].is_pressed = true;
-                }
-                if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) { // Released attiva l'azione vera e propria scatenando Handler
-                    HandleButtonPress(&buttons[i]);
-                }
-            }
-        }
-        
-        // Passa l'albero al Buffer testuale
-        ExprToString(exprList, displayBuffer, sizeof(displayBuffer));
-        
-        // Misura istantanea di rimbalzo elastico
-        int currentLen = strlen(displayBuffer); // Calcola la nuova lunghezza generata prima
-        if (currentLen > lastDisplayLen) { // Se è cresciuta per aver inserito una nuova cifra..
-            popAnim = 1.0f; // Attiva la spinta animata che andrà a scalare il textFont size (trigger)
-        }
-        lastDisplayLen = currentLen;
-        
-        // Aggiorna posizioni di Y dinamiche
-        if (isResultState) {
-            animSlideUp += dt * 10.0f; // Avanza a velocità incredibile di 10 frame temporali verso l'alto (Snappy e Instant)
-            if (animSlideUp > 1.0f) animSlideUp = 1.0f; // Cap limite per dire che l'animazione ha raggiunto il bordo
-        } else {
-            animSlideUp -= dt * 10.0f; // Opposto
-            if (animSlideUp < 0.0f) animSlideUp = 0.0f;
-        }
-        if (popAnim > 0.0f) {
-            popAnim -= dt * 10.0f; // Si sgonfia velocemente
-            if (popAnim < 0.0f) popAnim = 0.0f;
-        }
-
-        // FASE DI INIZIALIZZAZIONE DISEGNO GPU RAYLIB (Sfrutta pipeline Vulkan / OpenGL e si blocca in VSYNC)
-        BeginDrawing();
-        ClearBackground(BLANK); // Ripulisce i detriti del frame precedente (E essendo Wayland, BLANK=Trasparenza pura OS, senza FLAG)
-        
-        float appSmuss = 0.15f;
-        Rectangle appRec = {0, 0, SCREEN_WIDTH, SCREEN_HEIGHT};
-        // Colora la base dell'applicativo (Finestra Niri) calcolando isDark (Color) usando (R,G,B, Alpha). 
-        // 20,20,20, 180 farà intravedere lo sfondo del desktop sotto la calcolatrice dando l'effetto Vetro (Glass).
-        // App background (opaco per contornare l'app)
-        Color appBg = (IsSystemThemeDark() == 1) ? (Color){20, 20, 20, 255} : (Color){240, 240, 240, 255};
-        DrawRectangleRounded(appRec, appSmuss, SEGM, appBg); // Stampa il background pieno
-        
-        // Disegna un bordo di contorno per delineare l'app
-        Color outlineColor = (IsSystemThemeDark() == 1) ? (Color){60, 60, 60, 255} : (Color){180, 180, 180, 255};
-        DrawRectangleRoundedLines(appRec, appSmuss, SEGM, 3, outlineColor);
-        Rectangle displayRec = {
-            SCREEN_WIDTH * 0.05f, 
-            SCREEN_HEIGHT * 0.05f, 
-            SCREEN_WIDTH * 0.90f, 
-            SCREEN_HEIGHT * 0.25f
-        };
-        Color displayBg = (IsSystemThemeDark() == 1) ? (Color){ 10, 10, 10, 150 } : (Color){ 255, 255, 255, 150 };
-        DrawRectangleRounded(displayRec, SMUSS, SEGM, displayBg); // Sfondo LCD Calcolatrice
-        // E vi pone i margini tracciando solo il riquadro. GRAY : DARKGRAY crea contrasti netti
-        DrawRectangleRoundedLines(displayRec, SMUSS, SEGM, 2, (IsSystemThemeDark() == 1) ? GRAY : DARKGRAY);
-        
-        // Calcola grandezza fluttuante dovuta a (popAnim). Di norma è 34.0, ma sotto effetto pop sale elasticamente a 40.0.
-        float exprFontSize = 34.0f + (popAnim * 6.0f);
-        float resultFontSize = 46.0f;
-        
-        // Misura usando Comfortaa.ttf l'impatto a schermo generato (Per fare un Allineamento a Destra Perfetto).
-        Vector2 exprSize = MeasureTextEx(customFont, displayBuffer, exprFontSize, 1);
-        Vector2 resSize = MeasureTextEx(customFont, resultBuffer, resultFontSize, 1);
-        
-        // Punto di partenza (Centro verticale del nostro LCD finto)
-        float exprCenterY = displayRec.y + displayRec.height/2.0f - exprSize.y/2.0f;
-        
-        // Interpolazione lineare per sollevare l'espressione quando esce il risultato e far spuntare dal bordo il testo in verde.
-        float exprUpY = displayRec.y + 15.0f; // Dove andrà
-        float resCenterY = displayRec.y + displayRec.height/2.0f - resSize.y/2.0f + 10.0f; // La destinazione finale
-        float resDownY = displayRec.y + displayRec.height; // Da dove parte (Fuori dalla visuale del Box, ma non disegnata grazie a ScissorMode)
-        
-        // Valori finali interpolati per l'animazione Frame-per-Frame (Math_Lerp)
-        float currentExprY = exprCenterY + (exprUpY - exprCenterY) * animSlideUp;
-        float currentResY = resDownY + (resCenterY - resDownY) * animSlideUp;
-        
-        // Valori X che non cambiano mai, tenuti fissi verso Destra LCD
-        float exprX = displayRec.x + displayRec.width - 15.0f - exprSize.x;
-        float resX = displayRec.x + displayRec.width - 15.0f - resSize.x;
-        
-        Color exprColor = (IsSystemThemeDark() == 1) ? WHITE : BLACK;
-        Color resColor = (IsSystemThemeDark() == 1) ? GREEN : DARKGREEN;
-        // Dissolve text l'opacità per farlo svanire!
-        exprColor.a = 255 - (unsigned char)(animSlideUp * 100);
-        resColor.a = (unsigned char)(animSlideUp * 255); // Da 0 a 255 (Fade In del risultato)
-        
-        // Utilizziamo un clipping grafico Vulkan/Opengl (Scissor Mode), così il verde non trabocca fisicamente e 
-        // non disegna lettere fuori dalla UI della calcolatrice quando non ancora spawnate
-        BeginScissorMode((int)displayRec.x, (int)displayRec.y, (int)displayRec.width, (int)displayRec.height);
-        DrawTextEx(customFont, displayBuffer, (Vector2){exprX, currentExprY}, exprFontSize, 1, exprColor); // Applica stringhe
-        if (animSlideUp > 0.01f) {
-            DrawTextEx(customFont, resultBuffer, (Vector2){resX, currentResY}, resultFontSize, 1, resColor);
-        }
-        EndScissorMode(); // Blocca l'imbuto di clipping
-        
-        for (int i=0; i<NUM_BUTTONS; i++) {
-            if (buttons[i].text[0] != '\0') {
-                // Passa ogni singolo bottone e lascia che Button.c ci disegni la goccia visiva con le speculari e caustiche che avevamo discusso
-                DrawCalcButton(&buttons[i], mouse, customFont); 
-            }
-        }
-        
-        EndDrawing(); // Fine della pipeline di rendering e attesa VSync per il prossimo tick 144hz/60hz
-    }
-    
-    // Dealloca Garbage per non affaticare Wayland
-    ClearExpr(&exprList);
-    CloseWindow();
-    return 0; // Bye Bye
-}
+double stack[EXPR_MAX_NODES];   // 160
+char   ops[EXPR_MAX_NODES];     // 160
 ```
+
+Circa 1 440 byte di stack, con ogni push controllato nei limiti.
+
+**Il ciclo principale** usa un cursore esplicito `ExprNode* c` invece di un `for`,
+perché il ciclo interno di composizione dei numeri consuma più nodi:
+
+1. **Composizione dei numeri** — consuma-avanzato una sequenza di nodi
+   `NODE_DIGIT` e `'.'` in un `double`:
+   ```c
+   if (!inDec) val = val * 10.0 + c->val;
+   else { mult *= 0.1; val += c->val * mult; }
+   ```
+   poi applica l'eventuale negazione unaria pendente, push, e prosegue.
+
+2. **`NODE_VALUE`** — push diretto del `double`. È così che `Ans` entra nello stream.
+
+3. **Operatori**:
+   - Rilevamento del meno unario: `if (op == '-' && needOperand)` mette un flag
+     invece di spingere `'-'` sullo stack degli operatori. Gestisce `-5`, `3*-2`
+     e `5--3`.
+   - `if (needOperand) { *error = true; }` cattura `5 * * 3`.
+   - Drenaggio per precedenza: `while (opc > 0 && Prec(ops[opc-1]) >= Prec(op))`.
+     Il **`>=` è ciò che dà l'associatività a sinistra**, ed è la ragione per cui
+     `10-3-2 == 5` e `100/10/2 == 5` (entrambi testati).
+   - `Prec`: `* / %` → 2, `+ -` → 1, altrimenti 0.
+
+4. **Epilogo** — rifiuta l'operatore pendente (`5+`), rifiuta il `-` isolato,
+   svuota lo stack, e richiede `sp == 1`.
+
+`ApplyOp` restituisce `false` per divisione o modulo per zero e per operatori
+sconosciuti: è **l'unico imbuto di errore** per `/0` e `%0`.
+
+### 4.5 `FormatNumber`
+
+Sostituto progettato per `%g`, che tronca a 6 cifre significative ed emette
+`1e+06`.
+
+- `isnan` → `"Error"`, `isinf` → `"Infinity"` / `"-Infinity"`.
+- Nell'intervallo normale (`|v| == 0` oppure `1e-9 <= |v| < 1e12`): notazione fissa
+  con un numero di decimali dipendente dalla grandezza — 6 decimali per `>= 100`,
+  10 per `>= 1`, 12 per `>= 0.01`.
+- Rimuove gli zeri finali, poi il punto pendente.
+- Gestione **deliberatamente corretta** di `-0` → `0`, con un commento che spiega
+  che la versione ingenua produrrebbe `"00"`.
+- Fuori intervallo: `"%.6e"`.
+
+I contratti esatti sono fissati dai test: `1/3 → "0.333333333333"`,
+`1e15 → "1.000000e+15"`, `-0.0 → "0"`.
+
+### 4.6 `ExprToString`
+
+Singola passata con cursore, `memcpy` per token, restituisce i byte scritti. Un
+comportamento notevole: **la soppressione dello zero iniziale** avviene solo se il
+nodo successivo è a sua volta una cifra, così `05` diventa `5` ma `0.5` resta
+`0.5`. Entrambi i casi sono testati.
+
+---
+
+## 5. `ui/renderer.c` — il renderer SDF
+
+È il cambiamento architetturale più importante della storia recente del progetto.
+
+### 5.1 Motivazione
+
+Il commento d'intestazione di `renderer.h` è esplicito: prima ogni pulsante
+costava 4 primitive (ombra, corpo, highlight, bordo), cioè circa **100 chiamate
+di disegno per frame**, con l'anti-aliasing affidato interamente al MSAA della
+finestra.
+
+### 5.2 Due fragment shader su un vertex condiviso
+
+- **`FS_PANEL_SRC`** — pannello arrotondato generico con 10 uniform `vec4`
+  (`uP[10]`), che copre: copertura anti-aliased analitica
+  (`clamp(0.5 - d, 0, 1)`), ombra esterna morbida (`exp(-sd/…)`), glow colorato,
+  gradiente verticale del corpo, banda speculare superiore, griglia di punti,
+  anello di ripple della pressione, bordo interno.
+- **`FS_BG_SRC`** — sfondo dell'app: gradiente diagonale, glow dietro il display,
+  vignettatura, bordo.
+
+### 5.3 Il batching degli uniform
+
+> "Per non passare 40 uniform per frame, tutti i parametri di una forma viaggiano
+> in un unico array uniform vec4[10] caricato con una sola chiamata `glUniform4fv`."
+
+```c
+BeginShaderMode(g_panel);
+SetShaderValue(g_panel, g_uFbPanel, &g_fb, SHADER_UNIFORM_VEC2);
+SetShaderValueV(g_panel, g_uPanel, u, SHADER_UNIFORM_VEC4, 10);
+DrawRectangleRec(quad, WHITE);
+EndShaderMode();
+```
+
+Ogni forma costa quindi **2 chiamate GL** invece di 4 primitive. Il commento su
+`EndShaderMode` ricorda che `rlSetShader` forza il flush con gli uniform corretti.
+
+### 5.4 Degradazione pulita
+
+`RendererInit` verifica `id > 0 && locs != NULL` per entrambi gli shader e che
+tutte le locazioni degli uniform risolvano. Se qualcosa fallisce logga un
+avviso, lascia `g_ok = false`, e `DrawPanel`/`DrawBackground` cadono su
+`DrawPanelFallback`: rettangoli arrotondati piatti via raylib, senza ombra né
+gradiente.
+
+**L'app si avvia e resta accettabile anche senza alcun supporto shader.** È una
+delle decisioni più mature del progetto.
+
+### 5.5 Dettagli non ovvi
+
+- **Y-flip**: gli shader convertono l'origine in basso a sinistra di GL in quella
+  in alto a sinistra di raylib con
+  `vec2 frag = vec2(gl_FragCoord.x, uFb.y - gl_FragCoord.y)`.
+  `RendererSetFramebuffer` esce subito se il framebuffer non è cambiato, quindi è
+  un no-op nella maggior parte dei frame.
+- **Margine del quad**: viene espanso oltre la forma perché ombra e glow non
+  vengano ritagliati.
+- **Compositing `over()`** scritto a mano in GLSL con matematica premoltiplicata e
+  una divisione, così gestisce correttamente l'impilamento di livelli traslucidi.
+
+---
+
+## 6. `ui/theme.c` — il tema
+
+```c
+typedef struct { Color top, bottom; ... } Style;
+typedef struct { Style panel, display, button, ...; } Theme;
+```
+
+`DetectSystemThemeDark()` è **portabile su tre piattaforme**:
+
+| Piattaforma | Meccanismo |
+|---|---|
+| Windows | Registry `HKCU\...\Themes\Personalize\AppsUseLightTheme` via `RegOpenKeyExA` |
+| macOS | `defaults read -g AppleInterfaceStyle` |
+| Linux | `gsettings get org.gnome.desktop.interface color-scheme` |
+
+> **Il ramo Windows è codice morto su MSVC**, perché il file include
+> `<pthread.h>` e usa `<stdatomic.h>` incondizionatamente e MSVC non ha nessuno
+> dei due. Vedi §12.3.
+
+Il **thread di polling** è la correzione di un bug documentato nel codice stesso:
+prima `DetectSystemThemeDark()` veniva chiamata **19 volte per frame**, per
+570 ms/frame. Oggi il loop di rendering non esegue **zero** interrogazioni; il
+tema viene campionato in background.
+
+---
+
+## 7. `ui/button.c` — le animazioni
+
+Tre segnali indipendenti, tutti indipendenti dal framerate:
+
+| Segnale | Modello | Parametri |
+|---|---|---|
+| `press` | **Molla smorzata**, Eulero semi-implicito | `k = 320.0f`, `c = 26.0f`, clamp `[0, 1.3]`, `dt` clampato a `[0, 0.05]` perché un frame lungo non la faccia esplodere |
+| `hover` | Inseguimento esponenziale | `1 - exp(-dt*14)` |
+| `ripple` | Avanzamento lineare | `dt*2.6` |
+
+Il clamp di `dt` è un dettaglio di robustezza deliberato: senza, una pausa lunga
+o un frame bloccato porterebbero il sistema a divergere.
+
+**Lato render:**
+
+```c
+scale  = 1 - 0.055*p;              // il pulsante affonda
+lift   = hover*1.6;                // il pulsante si solleva
+bright = hover*0.12 - p*0.10;      // hover schiarisce, pressione scurisce
+```
+
+Tutto confluisce in un unico `Panel`, quindi un solo disegno shader per pulsante.
+
+`FlashButton` (in `main.c`) fa lookup per etichetta nella tabella `KEYS`, il che
+rinforza la fonte di verità unica.
+
+---
+
+## 8. `main.c` — stato, layout, input
+
+### 8.1 Il loop
+
+1. `BeginDrawing()` / `ClearBackground(BLANK)` — `BLANK` è completamente
+   trasparente, e la finestra ha `FLAG_WINDOW_TRANSPARENT`, così il compositore
+   mostra attraverso l'inset di 1px
+2. `RendererSetFramebuffer(...)`
+3. `DrawBackground(&bg)` — **una sola chiamata** per l'intero pannello dell'app
+4. `DrawDisplay(font, t)` — pannello del display, poi testo in scissor mode
+5. `DrawCalcButton(...)` per ogni pulsante
+6. Overlay FPS opzionale (F3)
+7. `EndDrawing()`
+
+Flag di finestra: sempre `FLAG_WINDOW_RESIZABLE | FLAG_WINDOW_TRANSPARENT`, più
+`FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT` in uso normale (vsync disattinato e MSAA
+condizionale in benchmark).
+
+**Lo scissor mode** racchiude il testo del display così che il risultato che
+scorre dal basso venga ritagliato invece di debordare.
+
+### 8.2 Layout proporzionale
+
+`UpdateLayout(sw, sh)` viene chiamato ogni frame ma **esce subito se le
+dimensioni non sono cambiate**:
+
+```c
+if (sw == cachedW && sh == cachedH) return;
+```
+
+Questa è una correzione rispetto alla versione precedente, che ricalcolava tutto
+ogni frame. Quando gira, tutto è **puramente proporzionale**, senza un solo
+posizionamento in pixel fisso tranne l'inset di 1px:
+
+- `side = min(sw, sh)`, `gap = side * GRID_GAP` (0.022)
+- `availW = sw * (1 - 2*GRID_MARGIN_X)` (0.055)
+- `displayRec` a `DISPLAY_TOP` (0.055), alto `DISPLAY_HEIGHT` (0.245)
+- `cellW = (availW - 3*gap)/4`, `cellH = (availH - 4*gap)/5`,
+  **`size = min(cellW, cellH)`** — è questo il passaggio che mantiene i pulsanti
+  **quadrati**, così la pillola con `ROUND_BUTTON = 1.0` resta un cerchio
+- La griglia è **centrata** su entrambi gli assi, così sopravvive a qualsiasi
+  aspect ratio di tiling
+
+`ResetButton()` ricostruisce tutto lo stato animativo al ridimensionamento,
+inizializzando `rippleAt` al centro di ogni pulsante.
+
+### 8.3 Adattamento del testo
+
+`FitFontSize` usa **ricerca binaria** (7 chiamate a `MeasureTextEx`) invece
+della vecchia scansione lineare da 1px (~30 chiamate), ed è avvolto da `FitCached`
+che memoizza su `(text, maxW)`, rendendolo di fatto gratuito a regime.
+
+### 8.4 Input
+
+**Mouse** — per ogni pulsante, `CheckCollisionPointRec` imposta `hovered`; se
+hovered e premuto e il ripple precedente è finito, ri-trigchera
+`FlashButtonPress(b, mouse)` così che **il ripple origini dal punto esatto della
+pressione**; al rilascio chiama `PressKey`.
+
+**Tastiera** — due canali indipendenti:
+
+- `GetKeyPressed()` in un `while`: `KEY_C`/`KEY_DELETE` → cancella,
+  `KEY_BACKSPACE` → backspace, `KEY_EQUAL`/`KEY_KP_EQUAL`/`KEY_ENTER`/`KEY_KP_ENTER`
+  → valuta, `KEY_UP`/`KEY_DOWN` → cronologia, `KEY_F3` → FPS
+- `IsKeyPressedRepeat(KEY_BACKSPACE)` — auto-repeat, **solo** per il backspace
+- `GetCharPressed()` in un `while`: cifre, `+-*/%`, `.`/`,` (virgola decimale
+  italiana), `=`/`\n`/`\r`
+
+---
+
+## 9. Il protocollo umano della calcolatrice
+
+Questa sezione merita attenzione perché **non è testabile** e **non è nel
+modulo `logic/`**: le regole di comportamento dell'utente sono intrecciate al
+ciclo di rendering.
+
+`PressKey` (in `main.c`) implementa:
+
+| Comportamento | Regola |
+|---|---|
+| `=` | `ShowResult()` |
+| `C` | `ClearAll()` |
+| **Dopo un risultato, un operatore** | continua da `Ans`: `ExprClear` → `ExprValue(lastResult)` → `ExprOp` |
+| **Dopo un risultato, qualsiasi altra cosa** | ricomincia da capo |
+| `.` subito dopo un operatore | inietta uno `0` iniziale (`5+` poi `.` → `5+0.`) |
+| Due operatori di fila | il primo viene rimosso (`5++3` → `5+3`) |
+| Backspace da stato risultato | cancella invece di editare |
+
+> **La principale critica architetturale del progetto.** `PressKey`,
+> `ShowResult`, `ClearAll` e `LoadHistory` stanno tutti in `main.c` e non sono
+> raggiungibili da `eval_test.c` senza aprire una finestra. Un `logic/keys.c` che
+> espone `PressKey` come macchina a stati pura sarebbe direttamente testabile, e
+> l'harness esistente lo coprirebbe senza modifiche. È la continuazione
+> dell'**Ans** a essere il comportamento più soggetto a bug, ed è proprio quello
+> che non ha test.
+
+---
+
+## 10. Test
+
+`eval_test.c`, 146 righe, **a mano**: nessun framework, nessun CTest, nessuna CI.
+**Non è in nessun target CMake** — va compilato a mano.
+
+### 10.1 Copertura
+
+| Sezione | Contenuto |
+|---|---|
+| Aritmetica | 13 casi: operazioni base, **precedenza** (`2+3*4`→14), **associatività a sinistra** (`10-3-2`→5, `100/10/2`→5), modulo, decimali, rumore floating (`0.1+0.2`) |
+| Numeri negativi e unario | 5 casi: `-5`, `-5+10`, `3*-2`, `5--3`, `-2*-3` — esercita il percorso `negateNext` |
+| Errori di sintassi | 8 casi: `1/0`, `5%0`, `5+`, `5*`, `*5`, `5**3`, `-`, `5+*3` |
+| Casi limite / overflow | 300 cifre in un tetto di 160; 100 000 cifre per la troncatura silenziosa |
+| Formattazione | 10 contratti di stringa esatta, incluso `-0.0 → "0"` |
+| Visualizzazione | 4 casi di `ExprToString`, inclusa la soppressione dello zero iniziale |
+| Pool | 200 cicli crea+distruggi; 40 espressioni lunghe simultanee |
+
+### 10.2 Igiene dei test
+
+Due problemi, entrambi onesti ma non bloccanti:
+
+1. **Il contatore di successi è in parte decorativo.** `eval_test.c:93` fa
+   `g_pass += 2` per il caso da 300 cifre **senza asserire nulla** — stampa e
+   basta. Lo stesso a riga 101, 132 e 140.
+2. **Il messaggio del caso da 300 cifre è fuorviante.** `ExprDigit` è limitato a
+   `EXPR_MAX_NODES = 160`, quindi vengono creati solo 160 nodi: il test verifica
+   **il tetto**, non un overflow da 300 nodi — che è il punto, ma la stringa
+   `"300 cifre -> %zu caratteri"` riporta 159 e suggerisce il contrario.
+
+### 10.3 Cosa non è testato
+
+`PressKey`, `ShowResult`, `ClearAll`, `LoadHistory` — tutti in `main.c`,
+irraggiungibili senza finestra. E con essi **la logica di continuazione dell'Ans**,
+che è il comportamento più delicato del progetto. Inoltre: gli shader e il
+fallback CPU, la matematica delle animazioni, `FitFontSize`/`FitCached`, il
+rilevamento del tema e il suo thread, la matematica di `UpdateLayout`, `shoot.sh`.
+
+### 10.4 Come eseguirli
+
+```bash
+gcc -O2 -o /tmp/eval_test eval_test.c logic/eval.c -lm && /tmp/eval_test
+```
+
+Exit 0 = tutto passa, 1 = fallimenti. **È l'unico comando di build testato che
+funzioni**, ed è anche l'unico documentato in qualsiasi file del repository.
+
+> **Miglioramento a basso costo e alto valore:** aggiungere
+> `enable_testing()` + `add_executable(eval_test …)` + `add_test(…)` al
+> `CMakeLists.txt` per far funzionare `ctest`.
+
+---
+
+## 11. Benchmark
+
+### 11.1 `bench_eval.c` (176 righe)
+
+Confronto a parità di condizioni. Contiene una **copia verbatim della vecchia
+implementazione** (`ONode`/`OAppendOp`/`OEval`) accanto all'`eval.h` reale, così
+il confronto è possibile senza dipendere dalla cronologia git. Il carico è
+un'espressione fissa da 44 token:
+
+```c
+static const char* SAMPLE = "123456789*987654321+42.5/3-17%5+88*2-31.25+6";
+```
+
+Due fasi: confronto vecchio/nuovo a `N = 20000`, e uno **sweep di scalabilità** a
+lunghezze 10/20/30/40 con `it = 5000`, riportando µs per ciclo e rapporto di
+speedup.
+
+> **Una riserva sullo sweep:** il generatore di espressioni costruisce
+> `big[i] = digit; big[i+1] = '+'`, che **sovrascrive** — le stringhe risultanti
+> sono sequenze del tipo `1+2+3+4+…` e non hanno i conteggi di token dichiarati.
+> `sink` impedisce al compilatore di eliminare il lavoro. Nessun flag `-O` è
+> fissato: lo fornisci tu.
+
+### 11.2 `bench_baseline.c` (47 righe)
+
+Sonda molto più stretta: cronometra 100 chiamate `popen("gsettings …")` ed
+estrae una proiezione, modellando 19 interrogazioni per frame. Contiene una sua
+copia di `IsSystemThemeDark_linux()` perché non può linkare quella reale — il file
+deve restare privo di raylib. Esegue anche un ciclo booleano da 1e6 iterazioni
+come controllo "un valore in cache è gratuito".
+
+> **Questo benchmark documenta un bug già corretto due volte.** Modella 19
+> interrogazioni per frame, che è esattamente ciò che il codice faceva prima e che
+> il thread di polling ha eliminato. **Il file è ora puramente storico.**
+
+### 11.3 Benchmark in-app
+
+`CALCC_BENCH=<n>` è quello reale. Distingue il tempo di frame wall-clock dalla
+**sola porzione di submission CPU**: `cpuT0` è preso subito prima di
+`BeginDrawing()` e `cpu` misurato subito prima di `EndDrawing()`, escludendo
+apposta l'attesa del vsync. I primi 30 frame sono scartati come warm-up.
+In benchmark il vsync viene spento (altrimenti misurerei il monitor) ma
+tutti gli altri flag restano quelli della build normale, MSAA compreso.
+
+```
+$ CALCC_BENCH=800 ./build/calcC
+== CALCC bench: 800 frame in 419.1 ms ==
+   frame completo :   0.502 ms  (1990.9 fps max)
+   registrazione  :   0.037 ms media |   0.078 ms picco  (770 frame)
+   -> budget frame 60 fps: 16.67 ms | 144 fps: 6.94 ms
+```
+
+**Confronto con la versione a primitive vettoriali**, stessa macchina, stessa
+identica configurazione di finestra:
+
+| | Frame completo | Registrazione CPU |
+|---|---|---|
+| 4 primitive per tasto, `-O0` | 0.698 ms | **0.528 ms** media, 0.682 picco |
+| 1 draw call per forma, `-O3` | 0.502 ms | **0.037 ms** media, 0.078 picco |
+
+La registrazione CPU è **~14× più bassa**. Il tempo di frame completo scende
+meno perché a quel punto non è più il limite: sotto i 0.5 ms domina la
+presentazione della finestra trasparente a Wayland, non il nostro lavoro.
+
+Su un run lungo di 40 000 frame (28 s, quindi attraversa due cicli di
+aggiornamento del tema) il picco di registrazione resta a 2.96 ms: **non ci
+sono più stall**, laddove il vecchio `popen` ne iniettava uno da 4.8 ms ogni
+10 secondi.
+
+### 11.4 Variabili d'ambiente
+
+Rilevate una volta sola all'avvio con `getenv`, in 4 righe di `main.c`. Nessuna
+attiva un comportamento di default: sono strumenti di misura e di collaudo.
+
+| Variabile | Effetto |
+|---|---|
+| `CALCC_BENCH=<n>` | Gira `n` frame senza vsync e stampa le statistiche, poi esce |
+| `CALCC_BENCH_NOMSA=1` | Nel benchmark, toglie anche MSAA (per isolarne il costo) |
+| `CALCC_SHOT=<nome.png>` | Salva uno screenshot della finestra al frame indicato |
+| `CALCC_SHOT_FRAME=<n>` | Frame dello screenshot (default 24) |
+| `CALCC_SHOT_KEYS="12.5*8="` | Sequenza di tasti da digitare prima dello screenshot |
+| `CALCC_SIZE=700x1000` | Apre la finestra a quelle dimensioni, per collaudare il layout |
+| `CALCC_THEME=light\|dark` | **Forza il tema**, disabilitando il rilevamento |
+| `CALCC_NOSHADER=1` | Disattiva lo shader e collauda il fallback su primitive |
+
+> **`TakeScreenshot` ignora i percorsi.** Raylib prende solo il nome del file e lo
+> scrive nel *base path* della finestra: `CALCC_SHOT=/tmp/x.png` finisce nella
+> directory di lavoro. Per questo `shoot.sh` avvia l'app con `env -C` sulla
+> directory di destinazione.
+
+---
+
+## 12. Bug, limiti e codice morto
+
+### 12.1 Le impostazioni del build non fanno quello che dicono
+
+🔴 **`USE_X11 OFF` non disabilita X11.** raylib non propaga quel flag a
+`GLFW_BUILD_X11`: la cache conferma `GLFW_BUILD_X11:BOOL=ON` **e**
+`GLFW_USE_WAYLAND:BOOL=ON`, e `link.txt` contiene `x11_init.c.o`, `glx_context.c.o`
+**insieme a** `wl_init.c.o`. **Entrambi i backend sono compilati** in
+`libraylib.a`, e GLFW fa `dlopen` di `libX11.so.6` o `libwayland-client.so.0` e
+sceglie a runtime.
+
+Il commento nel `CMakeLists.txt` — *"Forziamo Raylib a compilarsi SOLO per Wayland
+ignorando X11"* — **sovradichiara quello che il codice fa.** Comportamentalmente
+è innocuo, perché Wayland è preferito, ma la dichiarazione è falsa. *Il commento
+è stato riscritto per dire quello che accade davvero.*
+
+### 12.2 🔴 Nessun hash sull'URL di raylib
+
+`FetchContent_Declare(raylib URL …/5.0.tar.gz)` senza `URL_HASH`. L'archivio è
+pinnato per tag ma non verificato, e la build richiede rete al primo configure.
+
+### 12.3 La build Windows ora compila
+
+`ui/theme.c` includeva `<pthread.h>` e usava `<stdatomic.h>` incondizionatamente,
+e MSVC non ha nessuno dei due: il ramo di registro Windows era **codice morto su
+MSVC**, e la versione precedente, a thread singolo, compilava.
+
+Ora il file è protetto da `CALCC_HAS_THREAD`, che vale 0 su Windows: lì `ThemePollSystem`
+rilegge il registro in linea nel main loop con lo stesso intervallo di 10 s. La scelta è
+lecita perché su Windows la lettura del registro costa pochi microsecondi, non i 5 ms di
+un `popen` — il thread serve a non stallare il frame, e su Windows non c'è niente da
+stallare.
+
+### 12.4 Bug reali e spigoli acuti
+
+| # | Problema | Posizione | Stato |
+|---|---|---|---|
+| 1 | **Il rilascio del mouse attivava un tasto anche se il press era iniziato altrove**: `if (b->hovered && rel) PressKey(...)` senza tracciare dove fosse iniziato. Premi A, trascina su B, rilascia → partiva B | `main.c` | **Corretto**: `pressIndex` ricorda il tasto di partenza, azzerato anche da `UpdateLayout` |
+| 2 | **`EvaluateExpr` alloca due array da 160 elementi incondizionatamente** — 1,4 KB di stack per chiamata | `eval.c` | Innocuo qui; sarebbe un problema su uno stack piccolo. Non va in overflow: il test esercita 100 000 token in sicurezza |
+| 3 | **L'esaurimento del pool tronca in silenzio** | `eval.c` | Un'espressione troncata è peggio di un errore visibile se le costanti cambiassero |
+| 4 | **`FormatNumber` con `cap == 1`**: `end = out + strlen(out) - 1` puntava **prima** del buffer | `eval.c` | **Corretto**: `strlen` viene controllata prima di costruire il puntatore |
+| 5 | **`ExprPop` è O(n)** | `eval.c` | Accettabile a n ≤ 160 |
+| 6 | `target_include_directories` puntava a `graphics/`, inesistente | `CMakeLists.txt` | **Corretto**: voce rimossa |
+| 7 | `frameNo == shotFrame` verificato *dopo* `frameNo++`, quindi off by one | `main.c` | **Corretto**: `frameNo + 1 == shotFrame` |
+
+### 12.5 Limiti progettuali
+
+- ~~**Nessuna dimensione minima di finestra.**~~ *Risolto: `SetWindowMinSize(240, 340)`.*
+- **Nessuna parentesi**, nessun `√`, nessun `1/x`, nessun `±`, nessun `M+`/`MR`,
+  nessuna copia/incolla dagli appunti (`GetClipboardText`/`SetClipboardText` sono
+  un adattamento naturale e sono assenti), nessuna notazione scientifica in
+  ingresso — per cui `1e10` è irraggiungibile da tastiera, nonostante
+  `FormatNumber` ne supporti pienamente l'output.
+- **Nessuna accessibilità**: nessun equivalente ARIA, nessuna navigazione da
+  tastiera oltre i tasti fisici, nessuna garanzia di contrasto elevato.
+- **L'errore lascia intatta l'espressione** e scrive `Errore` sul display in **rosso**,
+  con una **scossa orizzontale smorzata** del riquadro e senza animazione di
+  ingresso. Resta però **nessuna indicazione di *dove* sia l'errore**: `1/0` e `5%0`
+  sono indistinguibili.
+- **Localizzazione solo italiana e hardcoded**: la stringa `Errore` e tutti i
+  commenti. Nessun layer i18n.
+- **`shoot.sh` ora parte da `CALCC_SHOT`** e usa `grim` solo come ripiego. I due
+  meccanismi **non sono equivalenti**: il primo cattura il solo framebuffer GL della
+  finestra (niente chrome del compositore, niente altre finestre), il secondo
+  cattura l'intero schermo.
+- **`shoot.sh` è specifico di niri** e non funziona su altri compositor né su X11.
+
+### 12.6 Codice morto
+
+| Simbolo | Stato |
+|---|---|
+| `ThemeIsDark()` (`theme.c`) | Definita e **mai chiamata** — `ThemeGet()->dark` la rende ridondante |
+| `g_liveNodes` (`eval.c`) | Incrementato e decrementato, **mai letto** — un contatore di debug o un'asserzione di leak mai collegata |
+| `bench_baseline.c` | Documenta un bug inesistente; nessun target, nessuna doc |
+| `bench_eval.c` | Nessun target né script — va compilato a mano come `eval_test.c` |
+
+### 12.7 Igiene del repository
+
+Nessuna CI, nessun `.github/`, nessuna `LICENSE`, nessun `.clang-format`, nessun
+target `install()` nel CMake. `git log` mostra 12 commit di un solo autore; il
+working tree è avanti rispetto a `master` con lavoro non committato.
+
+> ~~**La `build/` presente è obsoleta**~~ *Risolto: riconfigurata con
+> `CMAKE_BUILD_TYPE=Release`, ora con `Threads` e `ui/renderer.c`.*
+
+---
+
+## 13. Appendice
+
+### 13.1 Riferimenti di codice
+
+| Simbolo | Percorso |
+|---|---|
+| Tabella dei tasti | `main.c:14` |
+| `PressKey` (semantica) | `main.c:209` |
+| `UpdateLayout` (layout) | `main.c:86` |
+| Cache del layout | `main.c:87` |
+| `ResetButton` | `main.c:73` |
+| `FitFontSize` / `FitCached` | `main.c:312` / `335` |
+| Input mouse (`pressIndex`) | `main.c:556-570` |
+| Input tastiera | `main.c:268-313` |
+| Loop di rendering | `main.c:583-626` |
+| Caricamento font | `main.c:520` |
+| `ExprNode` / `NodeType` | `logic/eval.h:16-26` |
+| Pool di nodi | `logic/eval.c:13-39` |
+| `EvaluateExpr` | `logic/eval.c:248` |
+| `ApplyOp` | `logic/eval.c:231` |
+| `FormatNumber` | `logic/eval.c:135` |
+| `ExprToString` | `logic/eval.c:176` |
+| Shader pannello | `ui/renderer.c:34-129` |
+| Shader sfondo | `ui/renderer.c:131-197` |
+| `RendererInit` | `ui/renderer.c:208` |
+| `DrawPanelFallback` | `ui/renderer.c:273` |
+| Batch degli uniform | `ui/renderer.c:11-16` |
+| `DetectSystemThemeDark` | `ui/theme.c` (Win `:20`, macOS `:33`, Linux `:42`) |
+| `ThemeWorker` | `ui/theme.c:70-88` |
+| Animazioni pulsante | `ui/button.c:27-62` |
+| Layout del pulsante | `ui/button.c:112-169` |
+| Costanti di layout | `config.h` |
+| FetchContent raylib | `CMakeLists.txt` (riga 18-20) |
+
+### 13.2 Glossario
+
+| Termine | Significato in questo progetto |
+|---|---|
+| **raylib** | Libreria di grafica immediate-mode basata su OpenGL |
+| **Immediate mode** | Lo stato dell'interfaccia vive in variabili e si ridisegna da capo ogni frame, senza scene graph |
+| **SDF** | *Signed Distance Field*: funzione che dà la distanza con segno da una forma, usata qui per i bordi arrotondati, le ombre e i glow |
+| **Copertura anti-aliased** | In uno shader SDF, `clamp(0.5 - d, 0, 1)` stima quanta parte di un pixel è dentro la forma |
+| **MSAA** | *Multi-Sample Anti-Aliasing*, attivo a livello di finestra |
+| **Molla smorzata** | Sistema `ẍ = -k·x - c·ẋ`, che converge a zero con oscillazione; qui `k=320`, `c=26` |
+| **Shunting-yard** | Algoritmo di valutazione di espressioni che usa due stack ed evita la ricorsione |
+| **Associatività a sinistra** | `10-3-2` vale `(10-3)-2`; ottenuta qui con `>=` nel confronto delle precedenze |
+| **Free list** | Lista di blocchi liberati, per riallocare senza chiamare il sistema |
+| **msaa** / **vsync** | Vedi sopra; il vsync sincronizza il frame con il refresh del monitor |
+| **Frustum culling / scissor mode** | Ritaglio del disegno a un rettangolo, usato per il testo del display |
+| **niri** | Compositor Wayland a tiling, target esplicito di `shoot.sh` |
+| **grim** | Strumento di cattura schermo del compositor Wayland |
+| **popen** | Chiamata di sistema C che apre una pipe verso un processo shell — il meccanismo di `DetectSystemThemeDark` su Linux |
+
+### 13.3 Cosa **non** è determinabile dal codice
+
+- Se il vincolo di versione di CMake ≥ 4 sia intenzionale o un effetto collaterale
+  del consumo di raylib via `FetchContent`.
+- Perché `%` sia scelto al posto delle parentesi come quarto operatore della riga
+  superiore: il README precedente lo dava per scontato, nessun commento nel codice
+  lo motiva.
+- Se l'assenza di `SetWindowMinSize` sia un oversight o una scelta (per esempio per
+  permettere il tiling di finestre minuscole).
+- Le versioni esatte delle librerie di sistema risolte: nessun file le blocca.
+
+### 13.4 Metodo
+
+Lettura diretta di `CMakeLists.txt`, `config.h`, `main.c`, `logic/eval.{h,c}`,
+`ui/{theme,button,renderer}.{h,c}`, `eval_test.c`, `bench_eval.c`,
+`bench_baseline.c` e `shoot.sh`; conteggio righe; lettura della cache CMake e del
+`link.txt` generato per verificare quali backend GLFW siano realmente compilati;
+confronto tra le affermazioni del precedente README e `docs.md` e il sorgente
+corrente. Le osservazioni sui riferimenti di riga sono state ricontrollate
+immediatamente prima della stesura, dato che l'albero è stato modificato durante
+l'indagine.

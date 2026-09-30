@@ -6,53 +6,64 @@
 
 // ============================================================
 //  PALETTE CENTRALIZZATA
-//  Tutti i colori vivono qui: la UI non interpola piu' i colori
-//  dentro ogni bottone a ogni frame (erano 18 confronti ternary
-//  + 18 strcmp per frame solo per scegliere il colore).
+//  Un solo posto dove vivono i colori. Ogni elemento e' descritto
+//  da una coppia di colori (alto/basso) per il gradiente, non da un
+//  colore piatto: e' lo shader a trasformarlo in superficie.
 // ============================================================
+
+// Stile di un tasto o di un pannello.
+typedef struct {
+    Color  top, bottom;     // gradiente verticale del corpo
+    Color  text;            // etichetta
+    Color  border;          // bordo interno di stacco
+    float  borderW;
+    float  highlight;       // banda lucida sul bordo superiore [0..1]
+    float  shadow;          // ombra esterna [0..1]
+    Color  glowColor;       // alone dietro al tasto
+    float  glowStrength;    // 0 = nessun alone
+} Style;
+
 typedef struct {
     bool dark;
 
-    Color bg;            // sfondo app
-    Color outline;       // bordo app
-    Color shadow;        // ombra sotto i tasti (rgba, alpha basso)
+    // --- sfondo dell'app ---
+    Color bgTop, bgBottom;
+    Color bgBorder;
+    Color bgGlow;           // alone dietro al display
+    float bgGlowStrength;
+    Color bgVignette;
 
-    Color displayBg;     // riquadro display
-    Color displayLine;   // bordo display
-    Color displayDot;    // griglia di sfondo del display
+    // --- display ---
+    Color displayTop, displayBottom;
+    Color displayBorder;
+    Color displayDot;
+    Color displayShadow;
 
-    Color text;          // testo primario
-    Color textDim;       // espressione, etichette secondarie
-    Color result;        // colore del risultato
+    // --- testo ---
+    Color text;             // espressione corrente
+    Color textDim;          // etichette secondarie, "Ans"
+    Color result;           // risultato
+    Color error;            // risultato non valido
+    Color caret;            // cursore di digitazione
 
-    Color keyBg;         // tasti numerici
-    Color keyBgHover;
-    Color keyText;
-
-    Color opBg;          // tasti operatori
-    Color opBgHover;
-    Color opText;
-
-    Color eqBg;          // tasto '='
-    Color eqBgHover;
-    Color eqText;
-
-    Color dangerBg;      // tasto 'C'
-    Color dangerBgHover;
-    Color dangerText;
+    // --- tasti ---
+    Style key;              // cifre e '.'
+    Style op;               // + - * / %
+    Style eq;               // '='
+    Style danger;           // 'C'
 } Theme;
 
-// Palette inizializzata UNA volta sola all'avvio.
+// Inizializza la palette (una sola volta all'avvio).
 void  ThemeInit(void);
 
-// Rilevamento di sistema, eseguito al massimo una volta ogni
-// THEME_POLL_SECONDS e MAI dentro il loop di disegno.
-// Ritorna true se il tema e' cambiato (e quindi va ricalcolata la palette).
+// Il rilevamento del tema di sistema lancia un processo esterno e
+// costa ~5 ms: viene fatto in un thread separato, cosi' il main loop
+// non si blocca mai. Ritorna true se la palette e' cambiata.
 bool  ThemePollSystem(void);
 
-// true = tema scuro
-bool  ThemeIsDark(void);
+void  ThemeStop(void);         // ferma il thread (chiamare alla fine)
 
+bool  ThemeIsDark(void);
 const Theme* ThemeGet(void);
 
 #endif

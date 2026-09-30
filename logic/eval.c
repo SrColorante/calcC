@@ -41,7 +41,7 @@ static void NodeFree(ExprNode* n) {
 // ============================================================
 //  COSTRUZIONE / DISTRUZIONE  (tutte O(1) o O(n) lineare)
 // ============================================================
-void ExprInit(Expr* e) { e->head = NULL; e->tail = NULL; }
+void ExprInit(Expr* e) { e->head = NULL; e->tail = NULL; e->count = 0; }
 
 void ExprClear(Expr* e) {
     ExprNode* curr = e->head;
@@ -52,6 +52,7 @@ void ExprClear(Expr* e) {
     }
     e->head = NULL;
     e->tail = NULL;
+    e->count = 0;
 }
 
 static ExprNode* PushNode(Expr* e, NodeType type, double val) {
@@ -63,24 +64,25 @@ static ExprNode* PushNode(Expr* e, NodeType type, double val) {
     if (e->tail) e->tail->next = n;    // O(1): append in coda
     else         e->head = n;
     e->tail = n;
+    e->count++;
     return n;
 }
 
 void ExprDigit(Expr* e, int digit) {
     if (!e || digit < 0 || digit > 9) return;
-    if (ExprCount(e) >= EXPR_MAX_NODES) return;
+    if (e->count >= EXPR_MAX_NODES) return;      // O(1), non piu' una scansione
     PushNode(e, NODE_DIGIT, (double)digit);
 }
 
 void ExprValue(Expr* e, double v) {
     if (!e) return;
-    if (ExprCount(e) >= EXPR_MAX_NODES) return;
+    if (e->count >= EXPR_MAX_NODES) return;
     PushNode(e, NODE_VALUE, v);
 }
 
 void ExprOp(Expr* e, char op) {
     if (!e) return;
-    if (ExprCount(e) >= EXPR_MAX_NODES) return;
+    if (e->count >= EXPR_MAX_NODES) return;
     PushNode(e, NODE_OP, (double)(unsigned char)op);
 }
 
@@ -90,6 +92,7 @@ void ExprPop(Expr* e) {
     if (!e->head->next) {
         NodeFree(e->head);
         e->head = e->tail = NULL;
+        e->count = 0;
         return;
     }
     ExprNode* prev = e->head;
@@ -97,14 +100,10 @@ void ExprPop(Expr* e) {
     NodeFree(prev->next);
     prev->next = NULL;
     e->tail = prev;
+    e->count--;
 }
 
-int ExprCount(const Expr* e) {
-    if (!e || !e->head) return 0;
-    int n = 0;
-    for (ExprNode* c = e->head; c; c = c->next) n++;
-    return n;
-}
+int ExprCount(const Expr* e) { return e ? e->count : 0; }
 
 Expr ExprCopy(const Expr* src) {
     Expr out;
@@ -151,9 +150,12 @@ void FormatNumber(double v, char* out, size_t cap) {
         snprintf(out, cap, "%.*f", decimals, v);
 
         // rimuove zeri finali e il punto che resta appeso ("5." -> "5")
-        char* end = out + strlen(out) - 1;
-        while (end > out && *end == '0') { *end-- = '\0'; }
-        if (end > out && *end == '.') { *end = '\0'; }
+        size_t len = strlen(out);
+        if (len > 0) {                      // len == 0 punterebbe fuori buffer
+            char* end = out + len - 1;
+            while (end > out && *end == '0') { *end-- = '\0'; }
+            if (end > out && *end == '.') { *end = '\0'; }
+        }
 
         // corregge "-0" -> "0" (rimuovendo il segno, non sovrascrivendolo,
         // altrimenti "-0" diventerebbe "00")

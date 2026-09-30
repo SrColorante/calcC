@@ -27,9 +27,13 @@ typedef struct ExprNode {
 
 // Lista con puntatore di coda: append O(1) invece che O(n).
 // Prima ogni Append* percorreva l'intera lista -> costruzione O(n^2).
+// Il conteggio dei nodi vive nella struttura: ogni ExprDigit/ExprOp
+// chiamava ExprCount, che era O(n), quindi digitare una cifra costava
+// O(n) anche solo per controllare il limite.
 typedef struct {
     ExprNode *head;
     ExprNode *tail;
+    int       count;
 } Expr;
 
 void  PoolInit(void);
