@@ -23,6 +23,7 @@ add_executable(calcC
     main.c
     logic/eval.c
     ui/button.c
+    ui/theme.c
 )
 
 target_include_directories(calcC PRIVATE . graphics logic ui)

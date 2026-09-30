@@ -3,24 +3,31 @@
 
 #include <raylib.h>
 #include <stdbool.h>
+#include "theme.h"
 
 typedef enum {
-    BTN_NORMAL,
-    BTN_H_LONG,
-    BTN_V_LONG
-} ButtonShape;
+    BTN_DIGIT,
+    BTN_OP,
+    BTN_EQ,
+    BTN_CLEAR
+} ButtonKind;
 
 typedef struct {
-    int grid_x;
-    int grid_y;
-    ButtonShape shape;
-    char text[8];
-    Rectangle rect;
-    bool is_hovered;
-    bool is_pressed;
-    float visual_press_timer;
+    ButtonKind kind;
+    const char* text;      // puntatore a stringa statica: niente copia
+    Rectangle  rect;
+    float      press;      // 0..1, quanto e' premuto (animazione)
+    bool       hovered;
 } Button;
 
-void DrawCalcButton(Button* btn, Vector2 mousePos, Font font);
+// Calcola il font size del tasto dalla sua altezza, cosi' il
+// testo resta proporzionato a qualunque dimensione di finestra.
+float ButtonFontSize(const Button* b);
+
+// Disegna un tasto: ombra, corpo, riflesso ed etichetta.
+void DrawCalcButton(Button* b, Font font, const Theme* t);
+
+// Disegna l'etichetta centrata (usata anche dal display).
+void DrawCenteredText(Font font, const char* text, Rectangle box, float size, Color color);
 
 #endif

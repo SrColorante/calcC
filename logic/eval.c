@@ -1,145 +1,330 @@
 #include "eval.h"
-#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
 
-void AppendOp(ExprNode** head, char op) {
-    ExprNode* node = (ExprNode*)malloc(sizeof(ExprNode));
-    node->type = NODE_OP;
-    node->op = op;
-    node->next = NULL;
-    if (!*head) *head = node;
-    else { ExprNode* curr = *head; while (curr->next) curr = curr->next; curr->next = node; }
-}
+// ============================================================
+//  POOL DI NODI
+//  Prima ogni token dell'espressione era un malloc() e la
+//  cronologia faceva deep-copy -> malloc/freecontinui.
+//  Ora i nodi vengono presi da un array statico con free-list:
+//  allocazione O(1), nessuna frammentazione, nessun syscall.
+// ============================================================
+static ExprNode g_pool[NODE_POOL_SIZE];
+static ExprNode* g_freeList = NULL;
+static int g_liveNodes = 0;
 
-void AppendNum(ExprNode** head, int n) {
-    ExprNode* node = (ExprNode*)malloc(sizeof(ExprNode));
-    node->type = NODE_NUM;
-    node->n = n;
-    node->next = NULL;
-    if (!*head) *head = node;
-    else { ExprNode* curr = *head; while (curr->next) curr = curr->next; curr->next = node; }
-}
-
-double lastResult = 0.0;
-
-void ClearExpr(ExprNode** head) {
-    ExprNode* curr = *head;
-    while (curr) { ExprNode* next = curr->next; free(curr); curr = next; }
-    *head = NULL;
-}
-
-ExprNode* CopyExpr(ExprNode* head) {
-    if (!head) return NULL;
-    ExprNode* newHead = NULL;
-    ExprNode* curr = head;
-    while (curr) {
-        if (curr->type == NODE_NUM) AppendNum(&newHead, curr->n);
-        else AppendOp(&newHead, curr->op);
-        curr = curr->next;
+void PoolInit(void) {
+    for (int i = 0; i < NODE_POOL_SIZE - 1; i++) {
+        g_pool[i].next = &g_pool[i + 1];
     }
-    return newHead;
+    g_pool[NODE_POOL_SIZE - 1].next = NULL;
+    g_freeList = &g_pool[0];
+    g_liveNodes = 0;
 }
 
-void PopNode(ExprNode** head) {
-    if (!*head) return;
-    if (!(*head)->next) {
-        free(*head);
-        *head = NULL;
+static ExprNode* NodeAlloc(void) {
+    ExprNode* n = g_freeList;
+    if (n) {
+        g_freeList = n->next;
+        g_liveNodes++;
+    }
+    return n;
+}
+
+static void NodeFree(ExprNode* n) {
+    n->next = g_freeList;
+    g_freeList = n;
+    g_liveNodes--;
+}
+
+// ============================================================
+//  COSTRUZIONE / DISTRUZIONE  (tutte O(1) o O(n) lineare)
+// ============================================================
+void ExprInit(Expr* e) { e->head = NULL; e->tail = NULL; }
+
+void ExprClear(Expr* e) {
+    ExprNode* curr = e->head;
+    while (curr) {
+        ExprNode* next = curr->next;
+        NodeFree(curr);
+        curr = next;
+    }
+    e->head = NULL;
+    e->tail = NULL;
+}
+
+static ExprNode* PushNode(Expr* e, NodeType type, double val) {
+    ExprNode* n = NodeAlloc();
+    if (!n) return NULL;               // pool esaurito: ignora (nessun crash)
+    n->type = type;
+    n->val  = val;
+    n->next = NULL;
+    if (e->tail) e->tail->next = n;    // O(1): append in coda
+    else         e->head = n;
+    e->tail = n;
+    return n;
+}
+
+void ExprDigit(Expr* e, int digit) {
+    if (!e || digit < 0 || digit > 9) return;
+    if (ExprCount(e) >= EXPR_MAX_NODES) return;
+    PushNode(e, NODE_DIGIT, (double)digit);
+}
+
+void ExprValue(Expr* e, double v) {
+    if (!e) return;
+    if (ExprCount(e) >= EXPR_MAX_NODES) return;
+    PushNode(e, NODE_VALUE, v);
+}
+
+void ExprOp(Expr* e, char op) {
+    if (!e) return;
+    if (ExprCount(e) >= EXPR_MAX_NODES) return;
+    PushNode(e, NODE_OP, (double)(unsigned char)op);
+}
+
+void ExprPop(Expr* e) {
+    if (!e || !e->head) return;
+    // rimuove l'ultimo nodo tenendo aggiornata la coda
+    if (!e->head->next) {
+        NodeFree(e->head);
+        e->head = e->tail = NULL;
         return;
     }
-    ExprNode* curr = *head;
-    while (curr->next && curr->next->next) {
-        curr = curr->next;
-    }
-    free(curr->next);
-    curr->next = NULL;
+    ExprNode* prev = e->head;
+    while (prev->next->next) prev = prev->next;
+    NodeFree(prev->next);
+    prev->next = NULL;
+    e->tail = prev;
 }
 
-double EvaluateExpr(ExprNode* head, bool* error) {
-    *error = false;
-    if (!head) return 0;
-    
-    // 1. Convert linked list nodes to parallel arrays of doubles/chars.
-    double vals[100];
-    char ops[100];
-    int v_count = 0, o_count = 0;
-    
-    ExprNode* curr = head;
-    while (curr) {
-        if (curr->type == NODE_NUM || (curr->type == NODE_OP && curr->op == '.')) {
-            double val = 0;
-            double decimal_mult = 1;
-            bool in_decimal = false;
-            
-            while (curr && (curr->type == NODE_NUM || (curr->type == NODE_OP && curr->op == '.'))) {
-                if (curr->type == NODE_OP && curr->op == '.') {
-                    in_decimal = true;
-                } else if (curr->type == NODE_NUM) {
-                    if (!in_decimal) val = val * 10 + curr->n;
-                    else {
-                        decimal_mult /= 10.0;
-                        val = val + curr->n * decimal_mult;
-                    }
-                }
-                curr = curr->next;
-            }
-            vals[v_count++] = val;
-        } else {
-            ops[o_count++] = curr->op;
-            curr = curr->next;
-        }
+int ExprCount(const Expr* e) {
+    if (!e || !e->head) return 0;
+    int n = 0;
+    for (ExprNode* c = e->head; c; c = c->next) n++;
+    return n;
+}
+
+Expr ExprCopy(const Expr* src) {
+    Expr out;
+    ExprInit(&out);
+    if (!src) return out;
+    for (ExprNode* c = src->head; c; c = c->next) PushNode(&out, c->type, c->val);
+    return out;
+}
+
+bool ExprLastNumberHasDot(const Expr* e) {
+    if (!e || !e->head) return false;
+    const ExprNode* c = e->head;
+    bool hasDot = false;
+    while (c) {
+        if (c->type == NODE_OP && (int)c->val == '.') hasDot = true;
+        else if (c->type == NODE_OP) hasDot = false;   // nuovo numero -> riparte
+        c = c->next;
     }
-    
-    // Syntax Validation
-    if (v_count == 0 && o_count > 0) { *error = true; return 0; }
-    if (o_count >= v_count) { *error = true; return 0; }
-    
-    // 2. Multiply/Divide/Modulo
-    for (int i=0; i<o_count; i++) {
-        if (ops[i] == '*' || ops[i] == '/' || ops[i] == '%') {
-            if (ops[i] == '*') vals[i] = vals[i] * vals[i+1];
-            if (ops[i] == '/') {
-                if (vals[i+1] == 0) { *error = true; return 0; }
-                vals[i] = vals[i] / vals[i+1];
-            }
-            if (ops[i] == '%') {
-                if (vals[i+1] == 0) { *error = true; return 0; }
-                vals[i] = fmod(vals[i], vals[i+1]);
-            }
-            for (int j=i+1; j<v_count-1; j++) vals[j] = vals[j+1];
-            for (int j=i; j<o_count-1; j++) ops[j] = ops[j+1];
-            v_count--; o_count--; i--;
+    return hasDot;
+}
+
+// ============================================================
+//  FORMATTAZIONE DEI NUMERI
+//  %g prima tronca a 6 cifre significative: 1/3 -> 0.333333
+//  e produce "1e+06" che in una calcolatrice e' illeggibile.
+//  Qui: 12 cifre, notazione decimale per l'uso normale e
+//  scientifica solo quando serve davvero.
+// ============================================================
+void FormatNumber(double v, char* out, size_t cap) {
+    if (cap == 0) return;
+
+    if (isnan(v))      { snprintf(out, cap, "Error"); return; }
+    if (isinf(v))      { snprintf(out, cap, v > 0 ? "Infinity" : "-Infinity"); return; }
+
+    double a = fabs(v);
+
+    // Intervallo "normale": formato decimale, 12 cifre significative
+    if (a == 0.0 || (a >= 1e-9 && a < 1e12)) {
+        int decimals = 12;
+        if (a >= 100.0)      decimals = 6;
+        else if (a >= 1.0)   decimals = 10;
+        else if (a >= 0.01)  decimals = 12;
+
+        snprintf(out, cap, "%.*f", decimals, v);
+
+        // rimuove zeri finali e il punto che resta appeso ("5." -> "5")
+        char* end = out + strlen(out) - 1;
+        while (end > out && *end == '0') { *end-- = '\0'; }
+        if (end > out && *end == '.') { *end = '\0'; }
+
+        // corregge "-0" -> "0" (rimuovendo il segno, non sovrascrivendolo,
+        // altrimenti "-0" diventerebbe "00")
+        if (out[0] == '-' && out[1] == '0' && out[2] == '\0') {
+            out[0] = '0';
+            out[1] = '\0';
         }
+        return;
     }
-    
-    // 4. Add/Subtract
-    for (int i=0; i<o_count; i++) {
-        if (ops[i] == '+' || ops[i] == '-') {
-            if (ops[i] == '+') vals[i] = vals[i] + vals[i+1];
-            if (ops[i] == '-') vals[i] = vals[i] - vals[i+1];
-            for (int j=i+1; j<v_count-1; j++) vals[j] = vals[j+1];
-            for (int j=i; j<o_count-1; j++) ops[j] = ops[j+1];
-            v_count--; o_count--; i--;
+
+    // Molto grande o molto piccolo: notazione scientifica
+    snprintf(out, cap, "%.6e", v);
+}
+
+// ============================================================
+//  VISUALIZZAZIONE  (O(n) con cursore invece di strcat O(n^2))
+// ============================================================
+int ExprToString(const Expr* e, char* buf, int cap) {
+    if (cap <= 0) return 0;
+    buf[0] = '\0';
+    if (!e || !e->head) return 0;
+
+    int written = 0;
+    bool atStart = true;        // siamo ancora sul primo token scritto?
+
+    for (ExprNode* c = e->head; c; c = c->next) {
+        // salta lo zero iniziale se il token successivo e' un'altra cifra:
+        // "05" si mostra "5", ma "0.5" resta "0.5"
+        if (atStart && c->type == NODE_DIGIT && (int)c->val == 0) {
+            const ExprNode* nx = c->next;
+            if (nx && nx->type == NODE_DIGIT) continue;   // nodo scartato
         }
+        atStart = false;
+
+        char tmp[40];
+        int  n;
+
+        switch (c->type) {
+            case NODE_DIGIT:
+                tmp[0] = (char)('0' + (int)c->val);
+                tmp[1] = '\0';
+                n = 1;
+                break;
+            case NODE_OP:
+                tmp[0] = (char)(int)c->val;
+                tmp[1] = '\0';
+                n = 1;
+                break;
+            case NODE_VALUE:
+            default:
+                FormatNumber(c->val, tmp, sizeof(tmp));
+                n = (int)strlen(tmp);
+                break;
+        }
+
+        if (written + n >= cap) break;          // troncamento sicuro
+        memcpy(buf + written, tmp, (size_t)n);
+        written += n;
+        buf[written] = '\0';
     }
-    
-    if (v_count > 0) return vals[0];
+    return written;
+}
+
+// ============================================================
+//  VALUTAZIONE  (shunting-yard: O(n), rispetta la precedenza)
+// ============================================================
+static int Prec(char op) {
+    if (op == '*' || op == '/' || op == '%') return 2;
+    if (op == '+' || op == '-')              return 1;
     return 0;
 }
 
-void ExprToString(ExprNode* head, char* buffer, int max_len) {
-    buffer[0] = '\0';
-    ExprNode* curr = head;
-    while (curr) {
-        char temp[32];
-        if (curr->type == NODE_NUM) snprintf(temp, sizeof(temp), "%d", curr->n);
-        else {
-            if (curr->op == 's') snprintf(temp, sizeof(temp), "sqrt(");
-            else snprintf(temp, sizeof(temp), "%c", curr->op);
-        }
-        if (strlen(buffer) + strlen(temp) < (size_t)max_len) strcat(buffer, temp);
-        curr = curr->next;
+static bool ApplyOp(char op, double a, double b, double* out) {
+    switch (op) {
+        case '+': *out = a + b; return true;
+        case '-': *out = a - b; return true;
+        case '*': *out = a * b; return true;
+        case '/':
+            if (b == 0.0) return false;        // divisione per zero
+            *out = a / b;
+            return true;
+        case '%':
+            if (b == 0.0) return false;        // modulo per zero
+            *out = fmod(a, b);
+            return true;
+        default: return false;
     }
+}
+
+double EvaluateExpr(const Expr* e, bool* error) {
+    *error = false;
+    if (!e || !e->head) return 0.0;
+
+    double stack[EXPR_MAX_NODES];
+    char   ops[EXPR_MAX_NODES];
+    int    sp = 0;          // elementi nello stack dei valori
+    int    opc = 0;         // elementi nello stack degli operatori
+    bool   needOperand = true;   // siamo all'inizio o dopo un operatore?
+    bool   negateNext = false;   // c'è un '-' unario in attesa (es. "-5", "3*-2")
+
+    // cursore esplicito: il ciclo interno consuma piu' token, quindi
+    // l'avanzamento e' gestito qui e NON dall'incremento del for
+    ExprNode* c = e->head;
+
+    while (c) {
+        // ---- Costruisce un numero da una sequenza cifre/'.' ----
+        if (c->type == NODE_DIGIT || (c->type == NODE_OP && (int)c->val == '.')) {
+            double val = 0.0, mult = 1.0;
+            bool inDec = false;
+
+            while (c && (c->type == NODE_DIGIT || (c->type == NODE_OP && (int)c->val == '.'))) {
+                if (c->type == NODE_OP) inDec = true;
+                else if (!inDec)        val = val * 10.0 + c->val;
+                else { mult *= 0.1; val += c->val * mult; }
+                c = c->next;
+            }
+
+            if (negateNext) { val = -val; negateNext = false; }
+
+            if (sp >= EXPR_MAX_NODES) { *error = true; return 0.0; }
+            stack[sp++] = val;
+            needOperand = false;
+            continue;              // c e' gia' posizionato sul token successivo
+        }
+
+        if (c->type == NODE_VALUE) {
+            double v = negateNext ? -c->val : c->val;
+            negateNext = false;
+            if (sp >= EXPR_MAX_NODES) { *error = true; return 0.0; }
+            stack[sp++] = v;
+            needOperand = false;
+            c = c->next;
+            continue;
+        }
+
+        // ---- Operatore ----
+        char op = (char)(int)c->val;
+
+        // Meno unario: all'inizio ("-5") o dopo un operatore ("3*-2").
+        // Non entra nello stack: viene applicato al prossimo valore.
+        if (op == '-' && needOperand) { negateNext = true; c = c->next; continue; }
+
+        if (needOperand) { *error = true; return 0.0; }   // "5 * * 3"
+
+        while (opc > 0 && Prec(ops[opc - 1]) >= Prec(op)) {
+            char  top = ops[--opc];
+            if (sp < 2) { *error = true; return 0.0; }
+            double r;
+            if (!ApplyOp(top, stack[sp - 2], stack[sp - 1], &r)) { *error = true; return 0.0; }
+            sp -= 2;
+            stack[sp++] = r;
+        }
+        if (opc >= EXPR_MAX_NODES) { *error = true; return 0.0; }
+        ops[opc++] = op;
+        needOperand = true;
+        c = c->next;
+    }
+
+    if (needOperand && !negateNext) { *error = true; return 0.0; }   // "5+" o "5*"
+    if (negateNext)                 { *error = true; return 0.0; }   // solo "-"
+
+    // ---- Operatori rimasti (l'espressione finiva con "5+") ----
+    while (opc > 0) {
+        char top = ops[--opc];
+        if (sp < 2) { *error = true; return 0.0; }
+        double r;
+        if (!ApplyOp(top, stack[sp - 2], stack[sp - 1], &r)) { *error = true; return 0.0; }
+        sp -= 2;
+        stack[sp++] = r;
+    }
+
+    if (sp != 1) { *error = true; return 0.0; }
+    return stack[0];
 }

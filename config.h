@@ -1,78 +1,57 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define SCREEN_WIDTH 400
-#define SCREEN_HEIGHT 600
-#define FONT_SIZE 24
-#define SMUSS 0.45f
-#define SEGM 16
-
 #include "raylib.h"
 #include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
 
-// ==========================================
-// 1. IMPORTAZIONI CONDIZIONALI (Includi solo il necessario)
-// ==========================================
+// ============================================================
+//  COSTANTI DI LAYOUT (tutto proporzionale: la finestra puo'
+//  essere ridimensionata e tile-d senza che nulla si rompa)
+// ============================================================
+#define SCREEN_WIDTH   420
+#define SCREEN_HEIGHT  640
+
+// Smussi
+#define ROUND_APP     0.16f
+#define ROUND_DISPLAY 0.13f
+#define ROUND_BUTTON  1.0f   // 1.0 = pillola/cerchio perfetto
+#define SEGM          16
+
+// Frazione della finestra occupata dal display
+#define DISPLAY_TOP    0.055f
+#define DISPLAY_HEIGHT 0.235f
+
+// Gap fra i tasti, come frazione del lato minimo della finestra
+#define GRID_GAP       0.022f
+// Margine esterno della griglia, come frazione della larghezza
+#define GRID_MARGIN_X  0.055f
+
+// Cronologia
+#define MAX_HISTORY 20
+
+// Buffer del display
+#define MAX_EXPR_TEXT  160
+#define MAX_RESULT      48
+
+// Intervallo minimo fra due interrogazioni del tema di sistema.
+// Rilevare il tema AVVIA UN PROCESSO (popen/D-Bus): costa ~30 ms,
+// quindi va fatto il piu' raramente possibile, mai per frame.
+#define THEME_POLL_SECONDS 10.0
+
 #if defined(_WIN32) || defined(_WIN64)
-    #include <windows.h> // Incluso solo se sei su Windows
+    #include <windows.h>
 #elif defined(__APPLE__)
-    #include <stdio.h>   // Inclusi solo se sei su macOS
-    #include <string.h>
-#elif defined(__linux__)
-    #include <stdio.h>   // Inclusi solo se sei su Linux (es. ambiente GNOME)
-    #include <string.h>
+    #include <stdlib.h>
 #endif
 
-// ==========================================
-// 2. LA FUNZIONE ADATTIVA PER IL TEMA
-// ==========================================
-static inline int IsSystemThemeDark() {
-    
-    // CASO WINDOWS
-    #if defined(_WIN32) || defined(_WIN64)
-        HKEY hKey;
-        DWORD value = 1; // Default a Chiaro
-        DWORD valueSize = sizeof(value);
-
-        if (RegOpenKeyExA(HKEY_CURRENT_USER, 
-                          "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", 
-                          0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-            RegQueryValueExA(hKey, "AppsUseLightTheme", NULL, NULL, (LPBYTE)&value, &valueSize);
-            RegCloseKey(hKey);
-        }
-        return (value == 0) ? 1 : 0; // 1 per Scuro, 0 per Chiaro
-    
-    // CASO MAC OS
-    #elif defined(__APPLE__)
-        char buffer[128] = { 0 };
-        FILE *pipe = popen("defaults read -g AppleInterfaceStyle 2>/dev/null", "r");
-        if (!pipe) return 0;
-
-        if (fgets(buffer, sizeof(buffer), pipe) != NULL) {
-            pclose(pipe);
-            return (strncmp(buffer, "Dark", 4) == 0) ? 1 : 0;
-        }
-        pclose(pipe);
-        return 0;
-
-    // CASO LINUX (Verifica basata su desktop GNOME/Ubuntu standard)
-    #elif defined(__linux__)
-        char buffer[128] = { 0 };
-        FILE *pipe = popen("gsettings get org.gnome.desktop.interface color-scheme 2>/dev/null", "r");
-        if (!pipe) return 0;
-
-        if (fgets(buffer, sizeof(buffer), pipe) != NULL) {
-            pclose(pipe);
-            // GNOME restituisce 'prefer-dark' se la Dark Mode è attiva
-            return (strstr(buffer, "dark") != NULL) ? 1 : 0;
-        }
-        pclose(pipe);
-        return 0;
-
-    // CASO FALLBACK (Se l'OS non è tra questi, restituisce Chiaro di default)
-    #else
-        return 0; 
-    #endif
-}
+// ============================================================
+//  RILEVAMENTO TEMA DI SISTEMA  (COSTOSO - non chiamare per frame)
+//  Ritorna true se il tema di sistema e' scuro.
+//  AVVIA UN PROCESSO: su Linux costa ~30 ms.
+//  Implementazione in ui/theme.c.
+// ============================================================
+bool DetectSystemThemeDark(void);
 
 #endif
