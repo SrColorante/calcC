@@ -223,3 +223,53 @@ Dettaglio completo in [`docs.md`](./docs.md).
 | File | Contenuto |
 |---|---|
 | [`docs.md`](./docs.md) | Architettura, il motore shunting-yard, il renderer SDF, layout, test, limiti con riferimenti di codice |
+
+## Further reading
+
+External material covering the same ground. The cross-repo map, with the same
+links for all seven projects, is in `~/Progetti/RESOURCES.md`.
+
+### Build it from scratch
+
+- [Malloc is not magic — Implementing your own memory allocator](https://medium.com/p/e0354e914402)
+  — the direct counterpart to `logic/eval.c`: an arena over a static pool with
+  a free list, which is exactly the trade the README describes as O(1) and
+  fragmentation-free.
+- [How OpenGL works: software rendering in 500 lines of code](https://github.com/ssloy/tinyrenderer/wiki)
+  — background for the two GLSL 330 fragment shaders and the CPU fallback path.
+- [Regular Expression Matching Can Be Simple And Fast](https://swtch.com/~rsc/regexp/regexp1.html)
+  — a tokeniser built two states at a time, which is how the `KEYS[5][4]`
+  keymap table stays the single source of truth.
+- [Build Your Own Lisp](http://www.buildyourownlisp.com) — tokeniser, reader
+  and evaluator, the same pipeline as `eval.c` without the operator precedence.
+
+### Books
+
+- [Beej's Guide to C Programming](https://beej.us/guide/bgc/) — Brian "Beej" Jorgensen Hall
+- [Algorithms Design (in C)](https://www.ime.usp.br/~pf/algorithms/) — Paulo Feofiloff
+- [An Introduction to Modern CMake](https://cliutils.gitlab.io/modern-cmake/) — Henry Schreiner, for the `FetchContent` + policy version setup
+- [CMake Tutorial](https://cmake.org/cmake/help/latest/guide/tutorial/index.html) — official
+
+### Reference and practice
+
+- [roadmap.sh/c](https://roadmap.sh/c) · [roadmap.sh/linux](https://roadmap.sh/linux) (Wayland, and the compositors section)
+- [Awesome OpenGL](https://github.com/eug/awesome-opengl) ·
+  [Awesome C/C++](https://github.com/fffaraz/awesome-cpp) ·
+  [raylib](https://github.com/raysan5/raylib) ·
+  [Awesome Calculators](https://github.com/xxczaki/awesome-calculators)
+- [Project-based learning](https://github.com/practical-tutorials/project-based-learning):
+  [Breakout, in the OpenGL series](https://learnopengl.com/In-Practice/2D-Game/Breakout) ·
+  [Handmade Hero](https://handmadehero.org/) ·
+  [Concurrent servers](https://eli.thegreenplace.net/2017/concurrent-servers-part-2-threads/)
+  for the theme-polling thread in `ui/theme.c`.
+
+### Algorithms
+
+[CalcC is the project in this set that fits
+[Coding Interview University](https://github.com/jwasham/coding-interview-university)
+best](https://github.com/jwasham/coding-interview-university#coding-question-practice):
+the shunting-yard implementation is a stack-discipline problem, and the
+evaluator is where complexity actually shows up — the README already records
+that `ExprPop` is O(n) because it walks to the penultimate node instead of
+holding a pointer to it. Start with
+[the study plan](https://github.com/jwasham/coding-interview-university#the-study-plan).
